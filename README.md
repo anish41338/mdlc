@@ -1,0 +1,91 @@
+# mdlc — Mini Deep-Learning Compiler (ONNX → fused CUDA)
+
+A from-scratch ML compiler pipeline: an ONNX model goes in, an optimized
+executable comes out. The goal is to beat PyTorch eager on small models by
+eliminating per-op kernel-launch overhead and intermediate-tensor memory
+traffic through **operator fusion** — the single most important optimization
+in ML compilers.
+
+This is a "baby TVM": graph IR → rule-based graph passes → per-fused-group
+CUDA codegen → autotuning over schedules → a runtime with a liveness-based
+memory planner.
+
+## Pipeline
+
+```
+ONNX ──frontend──▶ Graph IR ──passes──▶ optimized IR ──codegen──▶ CUDA C
+                                  │                          │
+                              (fusion, DCE,              (NVRTC JIT)
+                               const-fold,                   │
+                               conv+bn fold)             autotuner
+                                                              │
+                                          ┌───────────────────┘
+                                          ▼
+                                    Runtime (topo exec + memory planner)
+```
+
+### Stages
+
+1. **Frontend** (`mdlc/frontend`) — parse ONNX protobuf into our own graph IR.
+   We use the `onnx` lib for *parsing only*; the IR is ours.
+2. **Graph passes** (`mdlc/passes`) — constant folding, dead-code elimination,
+   Conv+BN folding, Conv/Gemm+activation fusion, elementwise-chain fusion.
+3. **Codegen** (`mdlc/codegen`) — emit CUDA C from templates per fused group:
+   tiled shared-memory GEMM, im2col conv, generic elementwise-fusion. Compiled
+   with NVRTC at runtime.
+4. **Autotuner** (`mdlc/autotuner`) — grid/random search over tile sizes, block
+   dims, unroll factors per kernel per shape; cache best configs.
+5. **Runtime** (`mdlc/runtime`) — topological execution + a memory planner that
+   reuses buffers via liveness analysis.
+
+## Correctness first
+
+The hard part of a codegen compiler is that bugs are *silent numerical
+corruption*. So from day one there is a correctness harness
+(`mdlc/testing/harness.py`) that diffs every stage against ONNX Runtime,
+per-tensor, with tolerance thresholds. The NumPy reference executor
+(`mdlc/runtime/reference.py`) is the always-available oracle.
+
+## CPU vs GPU
+
+The whole pipeline runs on CPU using the NumPy reference executor — frontend,
+passes, harness, and memory planner are fully exercised without a GPU. The
+CUDA codegen *emits source* on any machine; the NVRTC compile-and-run backend
+and the autotuner are **GPU-gated** (`mdlc.codegen.cuda.nvrtc_runtime.cuda_available()`)
+and activate unchanged on a CUDA device.
+
+## Quickstart
+
+```bash
+pip install -e ".[ref,dev]"
+python -m mdlc.tools.build_resnet18                       # -> examples/resnet18.onnx
+python -m pytest -q                                       # run the test suite
+python -m mdlc.tools.compile examples/resnet18.onnx --report --emit out.cu
+python -m mdlc.tools.benchmark examples/resnet18.onnx     # optimization wins + latency
+```
+
+On ResNet-18 the pipeline currently collapses **141 graph ops to 32** (17 fused
+groups), emits **12 distinct CUDA kernels**, and the memory planner pools 13 MB
+of activations into **4.6 MB (65% saved)** — all verified bit-for-bit against
+ONNX Runtime.
+
+## Validating codegen without a GPU
+
+A real GPU is needed to *run* the kernels, but not to *prove them correct*.
+`mdlc/codegen/cuda/cpu_sim.py` compiles the **exact generated CUDA source** with
+a host C++ compiler under a shim that emulates the CUDA execution model — one OS
+thread per CUDA thread, `__shared__` as block-static memory, `__syncthreads()`
+as a sense-reversing barrier, blocks run serially. The tiled GEMM, im2col conv,
+and string-generated elementwise kernels are all diffed against NumPy this way,
+and `sim_executor` runs whole graphs through it. The identical source then runs
+unchanged via NVRTC (`nvrtc_runtime.py`) on a real device.
+
+## Target models
+
+ResNet-18 and MobileNet today; **RepViT** is the headline tie-in — the same
+model quantized with AIMET at Samsung, now fed through this compiler so the
+story is one arc: *quantize RepViT → compile the same ONNX to fused CUDA*. The
+INT8 quantized-GEMM (DP4A) codegen path is the stretch that fuses both worlds.
+
+See [docs/STATUS.md](docs/STATUS.md) for what's done, what's GPU-gated, and the
+known gaps (grouped/depthwise conv host-fallback, batch-1 conv codegen).

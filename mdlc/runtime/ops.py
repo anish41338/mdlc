@@ -1,0 +1,255 @@
+"""Pure-NumPy implementations of the tensor ops we support.
+
+These are the *semantics* of the IR: the reference executor and the
+correctness harness rely on them, and codegen is validated against them. Keep
+them simple and obviously correct rather than fast.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+
+# ----- shape/window helpers ----------------------------------------------
+
+def _resolve_pads(auto_pad: str, pads, in_hw, k_hw, s_hw, d_hw):
+    """Return ((pt, pb), (pl, pr)) for 2D, honoring ONNX auto_pad."""
+    ih, iw = in_hw
+    kh, kw = k_hw
+    sh, sw = s_hw
+    dh, dw = d_hw
+    if auto_pad in ("SAME_UPPER", "SAME_LOWER"):
+        out_h = -(-ih // sh)  # ceil
+        out_w = -(-iw // sw)
+        pad_h = max(0, (out_h - 1) * sh + (kh - 1) * dh + 1 - ih)
+        pad_w = max(0, (out_w - 1) * sw + (kw - 1) * dw + 1 - iw)
+        if auto_pad == "SAME_UPPER":
+            return (pad_h // 2, pad_h - pad_h // 2), (pad_w // 2, pad_w - pad_w // 2)
+        return (pad_h - pad_h // 2, pad_h // 2), (pad_w - pad_w // 2, pad_w // 2)
+    if pads is None:
+        return (0, 0), (0, 0)
+    # ONNX layout: [x1_begin, x2_begin, x1_end, x2_end]
+    return (pads[0], pads[2]), (pads[1], pads[3])
+
+
+def im2col(x, kh, kw, sh, sw, dh, dw, pads):
+    """N,C,H,W -> columns (N, C*kh*kw, out_h*out_w). Mirrors the CUDA path."""
+    n, c, h, w = x.shape
+    (pt, pb), (pl, pr) = pads
+    xp = np.pad(x, ((0, 0), (0, 0), (pt, pb), (pl, pr)))
+    out_h = (h + pt + pb - (dh * (kh - 1) + 1)) // sh + 1
+    out_w = (w + pl + pr - (dw * (kw - 1) + 1)) // sw + 1
+    cols = np.empty((n, c * kh * kw, out_h * out_w), dtype=x.dtype)
+    idx = 0
+    for ci in range(c):
+        for ky in range(kh):
+            for kx in range(kw):
+                patch = xp[:, ci, ky * dh: ky * dh + sh * out_h: sh,
+                                 kx * dw: kx * dw + sw * out_w: sw]
+                cols[:, idx, :] = patch.reshape(n, out_h * out_w)
+                idx += 1
+    return cols, out_h, out_w
+
+
+# ----- ops ----------------------------------------------------------------
+
+def conv(x, w, b, *, strides, pads, dilations, group, auto_pad="NOTSET"):
+    n, c, ih, iw = x.shape
+    oc, icg, kh, kw = w.shape
+    sh, sw = strides
+    dh, dw = dilations
+    p = _resolve_pads(auto_pad, pads, (ih, iw), (kh, kw), (sh, sw), (dh, dw))
+
+    if group == 1:
+        cols, out_h, out_w = im2col(x, kh, kw, sh, sw, dh, dw, p)
+        wm = w.reshape(oc, -1)                      # (oc, c*kh*kw)
+        out = np.einsum("ok,nkp->nop", wm, cols)    # (n, oc, out_h*out_w)
+        out = out.reshape(n, oc, out_h, out_w)
+    else:
+        # grouped / depthwise: run each group independently
+        outs = []
+        ocg = oc // group
+        for g in range(group):
+            xs = x[:, g * icg:(g + 1) * icg]
+            ws = w[g * ocg:(g + 1) * ocg]
+            cols, out_h, out_w = im2col(xs, kh, kw, sh, sw, dh, dw, p)
+            wm = ws.reshape(ocg, -1)
+            outs.append(np.einsum("ok,nkp->nop", wm, cols).reshape(n, ocg, out_h, out_w))
+        out = np.concatenate(outs, axis=1)
+    if b is not None:
+        out = out + b.reshape(1, -1, 1, 1)
+    return out
+
+
+def gemm(a, b, c, *, alpha=1.0, beta=1.0, transA=0, transB=0):
+    if transA:
+        a = a.T
+    if transB:
+        b = b.T
+    y = alpha * (a @ b)
+    if c is not None:
+        y = y + beta * c
+    return y
+
+
+def matmul(a, b):
+    return a @ b
+
+
+def batchnorm(x, scale, bias, mean, var, *, epsilon=1e-5):
+    shape = [1] * x.ndim
+    shape[1] = x.shape[1]
+    s = scale.reshape(shape)
+    b = bias.reshape(shape)
+    m = mean.reshape(shape)
+    v = var.reshape(shape)
+    return (x - m) / np.sqrt(v + epsilon) * s + b
+
+
+def maxpool(x, *, kernel, strides, pads, dilations=(1, 1), auto_pad="NOTSET", ceil_mode=0):
+    n, c, ih, iw = x.shape
+    kh, kw = kernel
+    sh, sw = strides
+    dh, dw = dilations
+    (pt, pb), (pl, pr) = _resolve_pads(auto_pad, pads, (ih, iw), (kh, kw), (sh, sw), (dh, dw))
+    xp = np.pad(x, ((0, 0), (0, 0), (pt, pb), (pl, pr)), constant_values=-np.inf)
+    div = (lambda a, bb: -(-a // bb)) if ceil_mode else (lambda a, bb: a // bb)
+    out_h = div(ih + pt + pb - (dh * (kh - 1) + 1), sh) + 1
+    out_w = div(iw + pl + pr - (dw * (kw - 1) + 1), sw) + 1
+    out = np.full((n, c, out_h, out_w), -np.inf, dtype=x.dtype)
+    for ky in range(kh):
+        for kx in range(kw):
+            patch = xp[:, :, ky * dh: ky * dh + sh * out_h: sh,
+                             kx * dw: kx * dw + sw * out_w: sw]
+            out = np.maximum(out, patch[:, :, :out_h, :out_w])
+    return out
+
+
+def averagepool(x, *, kernel, strides, pads, auto_pad="NOTSET",
+                count_include_pad=0, ceil_mode=0):
+    n, c, ih, iw = x.shape
+    kh, kw = kernel
+    sh, sw = strides
+    (pt, pb), (pl, pr) = _resolve_pads(auto_pad, pads, (ih, iw), (kh, kw), (sh, sw), (1, 1))
+    xp = np.pad(x, ((0, 0), (0, 0), (pt, pb), (pl, pr)))
+    div = (lambda a, bb: -(-a // bb)) if ceil_mode else (lambda a, bb: a // bb)
+    out_h = div(ih + pt + pb - kh, sh) + 1
+    out_w = div(iw + pl + pr - kw, sw) + 1
+    acc = np.zeros((n, c, out_h, out_w), dtype=np.float64)
+    cnt = np.zeros((n, c, out_h, out_w), dtype=np.float64)
+    ones = np.pad(np.ones((n, c, ih, iw)), ((0, 0), (0, 0), (pt, pb), (pl, pr)))
+    for ky in range(kh):
+        for kx in range(kw):
+            acc += xp[:, :, ky: ky + sh * out_h: sh, kx: kx + sw * out_w: sw][:, :, :out_h, :out_w]
+            cnt += ones[:, :, ky: ky + sh * out_h: sh, kx: kx + sw * out_w: sw][:, :, :out_h, :out_w]
+    denom = (kh * kw) if count_include_pad else np.maximum(cnt, 1)
+    return (acc / denom).astype(x.dtype)
+
+
+def global_average_pool(x):
+    return x.mean(axis=tuple(range(2, x.ndim)), keepdims=True).astype(x.dtype)
+
+
+# ----- elementwise / activations -----------------------------------------
+
+def relu(x):
+    return np.maximum(x, 0)
+
+
+def clip(x, lo=None, hi=None):
+    if lo is None:
+        lo = -np.inf
+    if hi is None:
+        hi = np.inf
+    return np.clip(x, lo, hi)
+
+
+def leaky_relu(x, alpha=0.01):
+    return np.where(x >= 0, x, alpha * x)
+
+
+def sigmoid(x):
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def tanh(x):
+    return np.tanh(x)
+
+
+def hard_sigmoid(x, alpha=0.2, beta=0.5):
+    return np.clip(alpha * x + beta, 0.0, 1.0)
+
+
+def hard_swish(x):
+    # ONNX HardSwish: x * max(0, min(1, x/6 + 0.5))
+    return x * np.clip(x / 6.0 + 0.5, 0.0, 1.0)
+
+
+def softmax(x, axis=-1):
+    z = x - np.max(x, axis=axis, keepdims=True)
+    e = np.exp(z)
+    return e / np.sum(e, axis=axis, keepdims=True)
+
+
+# Binary elementwise (with NumPy broadcasting == ONNX multidirectional).
+def add(a, b):
+    return a + b
+
+
+def sub(a, b):
+    return a - b
+
+
+def mul(a, b):
+    return a * b
+
+
+def div(a, b):
+    return a / b
+
+
+# ----- tensor reshaping ---------------------------------------------------
+
+def flatten(x, axis=1):
+    if axis < 0:
+        axis += x.ndim
+    outer = int(np.prod(x.shape[:axis])) if axis > 0 else 1
+    return x.reshape(outer, -1)
+
+
+def reshape(x, shape):
+    shape = list(int(s) for s in np.asarray(shape).ravel())
+    # ONNX: 0 means "copy from input", -1 means "infer".
+    out = []
+    for i, s in enumerate(shape):
+        out.append(x.shape[i] if s == 0 else s)
+    return x.reshape(out)
+
+
+def transpose(x, perm=None):
+    return np.transpose(x, perm)
+
+
+def concat(arrays, axis=0):
+    return np.concatenate(arrays, axis=axis)
+
+
+def squeeze(x, axes=None):
+    if axes is None:
+        return np.squeeze(x)
+    return np.squeeze(x, axis=tuple(int(a) for a in np.asarray(axes).ravel()))
+
+
+def unsqueeze(x, axes):
+    for a in sorted(int(v) for v in np.asarray(axes).ravel()):
+        x = np.expand_dims(x, a)
+    return x
+
+
+def pad(x, pads, value=0.0, mode="constant"):
+    pads = [int(p) for p in np.asarray(pads).ravel()]
+    half = len(pads) // 2
+    width = [(pads[i], pads[i + half]) for i in range(half)]
+    if mode == "constant":
+        return np.pad(x, width, mode="constant", constant_values=value)
+    return np.pad(x, width, mode={"reflect": "reflect", "edge": "edge"}.get(mode, "constant"))

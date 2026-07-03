@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.onnx
+*.ptx
+*.cubin
+*.so
+.cache/
+autotune_cache/
+*.log
+
+# generated compiler outputs
+examples/*.cu
+artifacts/gpu_run_*/raw/

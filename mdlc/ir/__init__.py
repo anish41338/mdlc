@@ -1,0 +1,13 @@
+"""The compiler's own intermediate representation.
+
+Deliberately small and explicit: a ``Graph`` owns ``Node`` objects and
+``TensorInfo`` metadata, with constant weights held as NumPy arrays in
+``initializers``. Everything downstream (passes, codegen, runtime) operates on
+this IR, never on ONNX protobuf directly.
+"""
+
+from mdlc.ir.tensor import DType, TensorInfo
+from mdlc.ir.node import Node
+from mdlc.ir.graph import Graph
+
+__all__ = ["DType", "TensorInfo", "Node", "Graph"]
