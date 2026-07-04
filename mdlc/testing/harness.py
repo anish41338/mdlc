@@ -23,6 +23,7 @@ import numpy as np
 
 from mdlc.ir import Graph
 from mdlc.runtime.reference import run_reference
+from mdlc.testing.tolerances import FP32_NETWORK
 
 
 def onnxruntime_available() -> bool:
@@ -51,8 +52,8 @@ def compare_arrays(
     got: np.ndarray,
     want: np.ndarray,
     *,
-    rtol: float = 1e-3,
-    atol: float = 1e-4,
+    rtol: float = FP32_NETWORK.rtol,
+    atol: float = FP32_NETWORK.atol,
 ) -> CheckResult:
     got = np.asarray(got, dtype=np.float64)
     want = np.asarray(want, dtype=np.float64)
@@ -68,6 +69,15 @@ def compare_arrays(
     if not ok:
         idx = np.unravel_index(int(diff.argmax()), diff.shape)
         detail = f"worst@{idx}: got={got[idx]:.6g} want={want[idx]:.6g}"
+    # A comparison where the golden values are at atol scale passes no matter
+    # what we computed — a vacuous PASS is more dangerous than a FAIL (this is
+    # how a dropped ReLU6 on an untrained MobileNetV2 went unnoticed). Flag it.
+    want_mag = float(np.abs(want).max()) if want.size else 0.0
+    if ok and atol > 0 and want_mag < 100 * atol:
+        return CheckResult(
+            name, False, max_abs, max_rel,
+            f"VACUOUS: golden magnitude {want_mag:.3e} < 100*atol={100*atol:.0e}; "
+            "comparison has no power — rescale the model/inputs")
     return CheckResult(name, ok, max_abs, max_rel, detail)
 
 
@@ -96,8 +106,8 @@ def check_graph_against_reference(
     golden: Optional[dict[str, np.ndarray]] = None,
     model_proto_bytes: Optional[bytes] = None,
     original_graph: Optional[Graph] = None,
-    rtol: float = 1e-3,
-    atol: float = 1e-4,
+    rtol: float = FP32_NETWORK.rtol,
+    atol: float = FP32_NETWORK.atol,
 ) -> list[CheckResult]:
     """Run ``graph`` through the reference executor and diff its outputs
     against a golden source. Returns one ``CheckResult`` per graph output."""
@@ -118,13 +128,16 @@ def make_pass_verifier(
     feeds: dict[str, np.ndarray],
     golden: dict[str, np.ndarray],
     *,
-    rtol: float = 1e-3,
-    atol: float = 1e-4,
+    rtol: float = FP32_NETWORK.rtol,
+    atol: float = FP32_NETWORK.atol,
 ) -> Callable[[Graph, str], None]:
-    """Build a verifier for ``PassManager.verify``. It re-runs the graph after
-    a pass and raises ``AssertionError`` if any output drifts past tolerance."""
+    """Build a verifier for ``PassManager.verify``. After every pass it checks
+    the graph's *structural* invariants (``mdlc.ir.verify_graph``), then re-runs
+    the graph and raises ``AssertionError`` if any output drifts past tolerance."""
+    from mdlc.ir.verify import verify_graph
 
     def verify(graph: Graph, pass_name: str) -> None:
+        verify_graph(graph, context=pass_name)
         results = check_graph_against_reference(
             graph, feeds, golden=golden, rtol=rtol, atol=atol
         )

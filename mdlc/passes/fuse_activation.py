@@ -45,7 +45,11 @@ class FuseActivation(Pass):
                 fused_from=[src.op_type, act.op_type],
             )
             fused.attrs["activation"] = act.op_type
-            self._capture_act_params(graph, act, fused)
+            if not self._capture_act_params(graph, act, fused):
+                # A parameter (e.g. Clip bound) is a runtime tensor we cannot
+                # bake into the epilogue. Fusing anyway would silently change
+                # the math, so leave the activation as its own node.
+                continue
 
             # Splice: new fused node where the source was, drop both originals.
             idx = graph.nodes.index(src)
@@ -55,10 +59,18 @@ class FuseActivation(Pass):
 
         return changed
 
-    def _capture_act_params(self, graph: Graph, act: Node, fused: Node) -> None:
+    def _capture_act_params(self, graph: Graph, act: Node, fused: Node) -> bool:
+        """Bake the activation's parameters into the fused node's attrs.
+
+        Returns False when a parameter exists but cannot be resolved to a
+        compile-time constant — in that case fusion must not happen (a Clip
+        whose bounds we drop would silently become identity).
+        """
         if act.op_type == "Clip":
-            lo = self._scalar(graph, act, 1, act.attr("min"))
-            hi = self._scalar(graph, act, 2, act.attr("max"))
+            ok_lo, lo = self._scalar(graph, act, 1, act.attr("min"))
+            ok_hi, hi = self._scalar(graph, act, 2, act.attr("max"))
+            if not (ok_lo and ok_hi):
+                return False
             fused.attrs["clip_min"] = lo
             fused.attrs["clip_max"] = hi
         elif act.op_type == "LeakyRelu":
@@ -66,10 +78,17 @@ class FuseActivation(Pass):
         elif act.op_type == "HardSigmoid":
             fused.attrs["alpha"] = act.attr("alpha", 0.2)
             fused.attrs["beta"] = act.attr("beta", 0.5)
+        return True
 
-    def _scalar(self, graph: Graph, node: Node, idx: int, fallback):
+    def _scalar(self, graph: Graph, node: Node, idx: int, attr_fallback):
+        """Resolve an optional scalar input to (resolved, value).
+
+        An absent/empty input slot is a legitimate None (e.g. one-sided Clip);
+        a *present* input that is not a constant initializer is unresolvable.
+        """
         if len(node.inputs) > idx and node.inputs[idx]:
             arr = graph.initializers.get(node.inputs[idx])
-            if arr is not None:
-                return float(np.asarray(arr).item())
-        return None if fallback is None else float(fallback)
+            if arr is None:
+                return False, None
+            return True, float(np.asarray(arr).item())
+        return True, (None if attr_fallback is None else float(attr_fallback))

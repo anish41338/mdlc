@@ -9,5 +9,6 @@ this IR, never on ONNX protobuf directly.
 from mdlc.ir.tensor import DType, TensorInfo
 from mdlc.ir.node import Node
 from mdlc.ir.graph import Graph
+from mdlc.ir.verify import GraphVerifyError, verify_graph
 
-__all__ = ["DType", "TensorInfo", "Node", "Graph"]
+__all__ = ["DType", "TensorInfo", "Node", "Graph", "GraphVerifyError", "verify_graph"]

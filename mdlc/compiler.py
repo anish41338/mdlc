@@ -26,6 +26,7 @@ from mdlc.testing.harness import (
     check_graph_against_reference,
     make_pass_verifier,
 )
+from mdlc.testing.tolerances import FP32_NETWORK
 
 
 @dataclass
@@ -39,7 +40,7 @@ class Compiled:
     golden: dict
     proto_bytes: Optional[bytes]
 
-    def verify(self, rtol: float = 1e-3, atol: float = 1e-4):
+    def verify(self, rtol: float = FP32_NETWORK.rtol, atol: float = FP32_NETWORK.atol):
         return check_graph_against_reference(
             self.graph, self.feeds, golden=self.golden, rtol=rtol, atol=atol)
 

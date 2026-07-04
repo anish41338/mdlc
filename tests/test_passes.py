@@ -16,6 +16,7 @@ from mdlc.passes import (
 from mdlc.passes.base import PassManager
 from mdlc.runtime import run_reference
 from mdlc.testing.harness import make_pass_verifier
+from mdlc.testing.tolerances import BITWISE, FP32_NETWORK, FP32_SAME_ORDER
 from mdlc.tools import build_models as bm
 
 
@@ -31,7 +32,8 @@ def test_pipeline_preserves_numerics(model_case):
     g2 = pm.run(g)             # verifier raises if any pass drifts
     out = run_reference(g2, feeds)
     for o in g2.outputs:
-        np.testing.assert_allclose(out[o], golden[o], rtol=1e-3, atol=1e-4)
+        np.testing.assert_allclose(out[o], golden[o],
+                                   rtol=FP32_NETWORK.rtol, atol=FP32_NETWORK.atol)
 
 
 def test_conv_bn_relu_fuses_to_single_node():
@@ -50,7 +52,8 @@ def test_conv_bn_fold_is_arithmetic_only():
     assert not any(n.op_type == "BatchNormalization" for n in g.nodes)
     after = run_reference(g, feeds)
     for o in g.outputs:
-        np.testing.assert_allclose(after[o], before[o], rtol=1e-4, atol=1e-5)
+        np.testing.assert_allclose(after[o], before[o],
+                                   rtol=FP32_SAME_ORDER.rtol, atol=FP32_SAME_ORDER.atol)
 
 
 def test_elementwise_fusion_groups_add_relu():
@@ -98,7 +101,68 @@ def test_constant_folding_removes_const_subgraph():
     assert not any(n.op_type == "Add" for n in g.nodes)   # folded away
     assert g.is_constant("c")
     out = run_reference(g, {"x": np.ones(4, np.float32)})
-    np.testing.assert_allclose(out["y"], np.full(4, 5.0), rtol=0, atol=1e-6)
+    np.testing.assert_allclose(out["y"], np.full(4, 5.0),
+                               rtol=BITWISE.rtol, atol=BITWISE.atol)
+
+
+def _clip_from_constants_model():
+    """Conv -> Clip(0,6) where the bounds come from Constant *nodes* (the
+    opset>=11 torch-export pattern that once silently fused to identity)."""
+    from onnx import TensorProto, helper, numpy_helper
+
+    rng = np.random.default_rng(7)
+    w = rng.standard_normal((4, 3, 3, 3)).astype(np.float32)
+    nodes = [
+        helper.make_node("Constant", [], ["lo"],
+                         value=numpy_helper.from_array(np.float32(0.0), "lo_v")),
+        helper.make_node("Constant", [], ["hi"],
+                         value=numpy_helper.from_array(np.float32(6.0), "hi_v")),
+        helper.make_node("Conv", ["x", "w"], ["c"],
+                         kernel_shape=[3, 3], pads=[1, 1, 1, 1]),
+        helper.make_node("Clip", ["c", "lo", "hi"], ["y"]),
+    ]
+    graph = helper.make_graph(
+        nodes, "clip_const",
+        [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 3, 8, 8])],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 4, 8, 8])],
+        [numpy_helper.from_array(w, "w")],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    model.ir_version = 9
+    return import_onnx_model(model)
+
+
+def test_clip_with_unresolvable_bounds_is_not_fused():
+    """FuseActivation alone (no constant folding) cannot resolve Constant-node
+    bounds — it must leave the Clip in place rather than fuse a wrong identity."""
+    g = _clip_from_constants_model()
+    FuseActivation().run(g)
+    assert any(n.op_type == "Clip" for n in g.nodes), \
+        "Clip with runtime-tensor bounds must not be fused away"
+
+
+def test_clip_bounds_resolved_through_pipeline():
+    """Through the default pipeline, Constants fold to initializers and the
+    Clip fuses with correct bounds; the clamp must actually happen."""
+    g = _clip_from_constants_model()
+    feeds = {"x": np.random.default_rng(8).standard_normal((1, 3, 8, 8)).astype(np.float32) * 3}
+    golden = _golden(g, feeds)
+    g = default_pipeline(verify=make_pass_verifier(feeds, golden)).run(g)
+    fused = [n for n in g.nodes if n.op_type == "FusedConvAct"]
+    assert len(fused) == 1
+    assert fused[0].attrs["clip_min"] == 0.0
+    assert fused[0].attrs["clip_max"] == 6.0
+    out = run_reference(g, feeds)["y"]
+    assert out.min() >= 0.0 and out.max() <= 6.0
+    np.testing.assert_allclose(out, golden["y"],
+                               rtol=FP32_SAME_ORDER.rtol, atol=FP32_SAME_ORDER.atol)
+
+
+def test_constant_folding_materializes_constant_nodes():
+    g = _clip_from_constants_model()
+    ConstantFolding().run(g)
+    assert not any(n.op_type == "Constant" for n in g.nodes)
+    assert g.is_constant("lo") and g.is_constant("hi")
 
 
 def test_dce_drops_dead_nodes():

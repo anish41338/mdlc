@@ -36,7 +36,10 @@ class ConstantFolding(Pass):
                 if node.op_type in _NEVER_FOLD:
                     continue
                 ins = node.real_inputs()
-                if not ins:
+                # Zero-input nodes: only Constant is safe to fold (its value
+                # lives in an attribute); anything else zero-input is either
+                # stateful or nondeterministic (e.g. RandomNormal).
+                if not ins and node.op_type != "Constant":
                     continue
                 if not all(graph.is_constant(i) for i in ins):
                     continue

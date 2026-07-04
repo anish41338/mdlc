@@ -87,5 +87,6 @@ model quantized with AIMET at Samsung, now fed through this compiler so the
 story is one arc: *quantize RepViT → compile the same ONNX to fused CUDA*. The
 INT8 quantized-GEMM (DP4A) codegen path is the stretch that fuses both worlds.
 
-See [docs/STATUS.md](docs/STATUS.md) for what's done, what's GPU-gated, and the
-known gaps (grouped/depthwise conv host-fallback, batch-1 conv codegen).
+See [docs/STATUS.md](docs/STATUS.md) for what's done and what's GPU-gated, and
+[docs/GAPS.md](docs/GAPS.md) for the measured gap inventory (grouped/depthwise
+conv host-fallback, conv codegen breaks at batch>1, per-model fallback lists).

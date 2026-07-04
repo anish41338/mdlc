@@ -5,6 +5,7 @@ import pytest
 
 from conftest import build_graph, requires_ort
 from mdlc.runtime import run_reference
+from mdlc.testing.tolerances import FP32_NETWORK
 
 
 def test_import_preserves_io():
@@ -36,4 +37,5 @@ def test_reference_matches_onnxruntime(model_case):
                                 providers=["CPUExecutionProvider"])
     outs = sess.run(None, {k: v.astype(np.float32) for k, v in feeds.items()})
     for (oname, oval) in zip([o.name for o in sess.get_outputs()], outs):
-        np.testing.assert_allclose(ref[oname], oval, rtol=1e-3, atol=1e-4)
+        np.testing.assert_allclose(ref[oname], oval,
+                                   rtol=FP32_NETWORK.rtol, atol=FP32_NETWORK.atol)

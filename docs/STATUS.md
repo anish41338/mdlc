@@ -1,7 +1,27 @@
 # Status, GPU-gating, and known gaps
 
 A snapshot of what is built and verified, what only activates on a CUDA device,
-and the deliberate limitations to close next.
+and the deliberate limitations to close next. The exhaustive measured gap
+inventory (per-model fallbacks, RepViT op set, audit findings) lives in
+[GAPS.md](GAPS.md).
+
+## Phase 0 (2026-07-04) — ground-truth audit: complete
+
+- Headline ResNet-18 numbers (141→32, 12 kernels, 65% memory) reproduced from
+  commands; MobileNetV2 and RepViT-m0_9 exporters added (`tools/build_*.py`).
+- **Fixed a silent-corruption bug**: Clip/ReLU6 fused with unresolvable bounds
+  became identity on MobileNetV2 — caught only because the audit probed the
+  oracle's power. Constant nodes now fold to initializers; unresolvable
+  activation params block fusion; the harness fails **vacuous** comparisons
+  (golden ≈ atol); exporters LSUV-calibrate so every layer keeps O(1) signal.
+- Structural graph verifier (`mdlc/ir/verify.py`) runs after every pass in any
+  verified pipeline: dangling edges, duplicate producers, cycles, orphans,
+  initializer/shape drift. All five passes proven idempotent in tests.
+- Tolerance contract frozen in `mdlc/testing/tolerances.py` (4 tiers, all call
+  sites migrated, only tightenings).
+- `compile --report` now prints the named host-fallback list per model.
+- Corrected fact: conv codegen works at N=1 and breaks at N>1 (not the
+  reverse); Phase 1 adds N∈{1,2,8} parity tests permanently.
 
 ## Done and verified on CPU
 
@@ -40,13 +60,13 @@ caught at the stage that introduced it, not days later.
 `cuda_available()` is the single gate. This machine has an Intel iGPU, so that
 returns `False` and the GPU code is never entered.
 
-## Known gaps / next steps
+## Known gaps / next steps (measured inventory in GAPS.md)
 
 1. **Grouped & depthwise conv** fall back to the host executor (the im2col→GEMM
    path assumes `group==1`). MobileNet/RepViT lean on depthwise — needs a
    depthwise conv kernel template. *Highest-value next item.*
 2. **Conv codegen is batch-1** (im2col lowers one CHW image). Loop over N, or
-   batch the im2col, for N>1.
+   batch the im2col, for N>1. Verified: N=1 passes, N∈{2,8} crash at reshape.
 3. **GEMM `alpha`/`beta` ≠ 1** aren't applied in the kernel epilogue (fine for
    standard inference Gemm/Linear; fold them in for generality).
 4. **Pooling / softmax / reshape** are host fallbacks. Cheap and correct, but a

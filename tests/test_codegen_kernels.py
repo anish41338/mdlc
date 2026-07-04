@@ -12,6 +12,7 @@ from mdlc.codegen.cuda.templates import (
     im2col_kernel,
 )
 from mdlc.runtime import ops
+from mdlc.testing.tolerances import BITWISE, FP32_REDUCTION, FP32_SAME_ORDER
 
 
 def test_schedule_validity_and_pruning():
@@ -49,7 +50,8 @@ def test_gemm_kernel_matches_numpy(sched, act, bias):
         ref = np.maximum(ref, 0)
     elif act == "Sigmoid":
         ref = 1.0 / (1.0 + np.exp(-ref))
-    np.testing.assert_allclose(got, ref, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(got, ref,
+                               rtol=FP32_REDUCTION.rtol, atol=FP32_REDUCTION.atol)
 
 
 @requires_gpp
@@ -68,7 +70,8 @@ def test_im2col_kernel_matches_numpy():
     cols = simulate_im2col(src, name, x, KH=KH, KW=KW, OH=OH, OW=OW,
                            SH=SH, SW=SW, PH=PH, PW=PW, DH=DH, DW=DW)
     ref, _, _ = ops.im2col(x[None], KH, KW, SH, SW, DH, DW, ((PH, PH), (PW, PW)))
-    np.testing.assert_allclose(cols, ref[0], rtol=0, atol=1e-5)
+    np.testing.assert_allclose(cols, ref[0],
+                               rtol=BITWISE.rtol, atol=BITWISE.atol)
 
 
 @requires_gpp
@@ -91,7 +94,8 @@ def test_conv_via_im2col_and_gemm():
     out = out.reshape(OC, OH, OW)
     ref = np.maximum(ops.conv(x[None], w, bias, strides=[1, 1], pads=[1, 1, 1, 1],
                               dilations=[1, 1], group=1)[0], 0)
-    np.testing.assert_allclose(out, ref, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(out, ref,
+                               rtol=FP32_REDUCTION.rtol, atol=FP32_REDUCTION.atol)
 
 
 @requires_gpp
@@ -112,4 +116,5 @@ def test_elementwise_kernel_matches_numpy():
     outs = simulate_elementwise(src, name, ext, arrs, 1)
     env = dict(zip(ext, arrs))
     ref = np.maximum(env["a"] + env["b"], 0) * env["c"]
-    np.testing.assert_allclose(outs[0], ref, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(outs[0], ref,
+                               rtol=FP32_SAME_ORDER.rtol, atol=FP32_SAME_ORDER.atol)
