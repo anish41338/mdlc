@@ -7,6 +7,8 @@ them simple and obviously correct rather than fast.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 
@@ -150,6 +152,14 @@ def global_average_pool(x):
     return x.mean(axis=tuple(range(2, x.ndim)), keepdims=True).astype(x.dtype)
 
 
+def reduce_mean(x, axes=None, keepdims=1):
+    if axes is None:
+        ax = None
+    else:
+        ax = tuple(int(a) % x.ndim for a in np.atleast_1d(np.asarray(axes)))
+    return x.mean(axis=ax, keepdims=bool(keepdims)).astype(x.dtype)
+
+
 # ----- elementwise / activations -----------------------------------------
 
 def relu(x):
@@ -183,6 +193,16 @@ def hard_sigmoid(x, alpha=0.2, beta=0.5):
 def hard_swish(x):
     # ONNX HardSwish: x * max(0, min(1, x/6 + 0.5))
     return x * np.clip(x / 6.0 + 0.5, 0.0, 1.0)
+
+
+# Exact (double-precision libm) erf, vectorized. NumPy has no erf and scipy is
+# not a core dependency; math.erf per element is slow but this is the *oracle*,
+# where exactness beats speed. GELU exports decompose to Erf at opset 17.
+_erf_ufunc = np.frompyfunc(math.erf, 1, 1)
+
+
+def erf(x):
+    return _erf_ufunc(np.asarray(x, dtype=np.float64)).astype(np.asarray(x).dtype)
 
 
 def softmax(x, axis=-1):

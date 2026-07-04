@@ -19,7 +19,12 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from mdlc.codegen.schedule import DEFAULT_GEMM, GemmSchedule
+from mdlc.codegen.schedule import (
+    DEFAULT_DEPTHWISE,
+    DEFAULT_GEMM,
+    DepthwiseSchedule,
+    GemmSchedule,
+)
 from mdlc.codegen.cuda import templates as T
 from mdlc.ir import Graph, Node
 from mdlc.runtime import ops
@@ -33,6 +38,15 @@ HOST_FALLBACK = {
     "MaxPool", "AveragePool", "GlobalAveragePool", "Flatten", "Reshape",
     "Transpose", "Concat", "Squeeze", "Unsqueeze", "Pad", "Softmax", "Identity",
 }
+
+# Pointwise ops the elementwise emitter can lower, fused or standalone.
+ELEMENTWISE_OPS = {
+    "Relu", "Sigmoid", "Tanh", "HardSwish", "Clip", "Add", "Mul", "Sub", "Div",
+    "LeakyRelu", "HardSigmoid", "Erf",
+}
+
+# Metadata-only reshapes: the output aliases the input buffer.
+VIEW_OPS = {"Flatten", "Reshape", "Squeeze", "Unsqueeze", "Identity"}
 
 
 @dataclass
@@ -96,12 +110,16 @@ class CudaModule:
 
 
 class CudaCodegen:
-    def __init__(self, schedule_fn: Optional[ScheduleFn] = None) -> None:
+    def __init__(self, schedule_fn: Optional[ScheduleFn] = None,
+                 dw_schedule_fn=None) -> None:
         self.schedule_fn = schedule_fn or (lambda node, mnk: DEFAULT_GEMM)
+        self.dw_schedule_fn = dw_schedule_fn or (lambda node, sig: DEFAULT_DEPTHWISE)
         self.kernels: dict[str, str] = {}
         self.plan: list[Launch] = []
         self.scratch: dict[str, tuple] = {}
         self._gemm_cache: dict[tuple, str] = {}
+        self._dw_cache: dict[tuple, str] = {}
+        self._reduce_cache: dict[tuple, str] = {}
         self._ew_count = 0
         self._has_im2col = False
 
@@ -145,10 +163,30 @@ class CudaCodegen:
                 self._lower_matmul(g, node)
             elif op == "FusedElementwise":
                 self._lower_elementwise(g, node)
-            elif op in HOST_FALLBACK or op in ("Relu", "Sigmoid", "Tanh",
-                                               "HardSwish", "Clip", "Add", "Mul",
-                                               "Sub", "Div", "LeakyRelu",
-                                               "HardSigmoid"):
+            elif op == "GlobalAveragePool":
+                self._lower_reduce_hw(g, node)
+            elif op == "ReduceMean" and self._is_hw_mean(g, node):
+                self._lower_reduce_hw(g, node)
+            elif op == "MaxPool" and node.attrs.get("ceil_mode", 0) == 0:
+                self._lower_maxpool(g, node)
+            elif op in VIEW_OPS:
+                # Pure metadata: same bytes, new shape. Never a kernel, never
+                # a host fallback — the runtime aliases the buffer.
+                self.plan.append(Launch(
+                    "view", op, [node.inputs[0]], [node.outputs[0]], (), (),
+                    meta={"out_shape": self._shape(g, node.outputs[0]),
+                          "node": node}))
+            elif op in ELEMENTWISE_OPS:
+                # A lone elementwise op (e.g. MobileNetV2's bare residual Add:
+                # linear bottlenecks leave no activation to chain) lowers
+                # through the same fused-elementwise emitter as a
+                # one-node subgraph — never to host.
+                single = Node("FusedElementwise", list(node.inputs),
+                              [o for o in node.outputs if o],
+                              attrs={"subgraph": [node]},
+                              name=(node.name or op) + "_single")
+                self._lower_elementwise(g, single)
+            elif op in HOST_FALLBACK:
                 self.plan.append(Launch("host", op, node.real_inputs(),
                                         [o for o in node.outputs if o],
                                         (), (), meta={"node": node}))
@@ -172,11 +210,20 @@ class CudaCodegen:
         PH, PW = pads[0], pads[1]
         group = a.get("group", 1)
 
-        # Depthwise/grouped conv: keep on host for now (im2col-GEMM path assumes
-        # group==1). Common in MobileNet/RepViT; flagged as a known gap.
+        # Depthwise (group == C_in, one input channel per output channel):
+        # direct kernel — im2col would multiply memory traffic by KH*KW for
+        # zero GEMM benefit. Covers channel multiplier m >= 1.
+        if group == C and ws[1] == 1:
+            self._lower_depthwise(g, node, xs=xs, ws=ws, ys=ys,
+                                  SH=SH, SW=SW, PH=PH, PW=PW, DH=DH, DW=DW)
+            return
+
+        # General grouped conv (1 < group < C_in): rare in the target models,
+        # correctness-first — per-group slices through the im2col+GEMM path,
+        # still on device (no host fallback).
         if group != 1:
-            self.plan.append(Launch("host", node.op_type, node.real_inputs(),
-                                    list(node.outputs), (), (), meta={"node": node}))
+            self._lower_grouped(g, node, xs=xs, ws=ws, ys=ys, group=group,
+                                SH=SH, SW=SW, PH=PH, PW=PW, DH=DH, DW=DW)
             return
 
         if not self._has_im2col:
@@ -189,12 +236,6 @@ class CudaCodegen:
         cols = node.outputs[0] + "__cols"
         self.scratch[cols] = (K, P)
         bx, byd = 16, 16
-        self.plan.append(Launch(
-            "im2col", "im2col", [x], [cols],
-            ((P + bx - 1) // bx, (K + byd - 1) // byd, 1), (bx, byd, 1),
-            meta={"C": C, "H": H, "W": W, "KH": KH, "KW": KW, "OH": OH, "OW": OW,
-                  "SH": SH, "SW": SW, "PH": PH, "PW": PW, "DH": DH, "DW": DW,
-                  "batch": n}))
 
         activation = node.attrs.get("activation")
         kname = self._emit_gemm(OC, P, K, with_bias=bool(has_bias),
@@ -202,11 +243,164 @@ class CudaCodegen:
         sched = self.schedule_fn(None, (OC, P, K))
         grid, block = self._grid_block_gemm(OC, P, sched)
         inputs = [w, cols] + ([node.inputs[2]] if has_bias else [])
-        self.plan.append(Launch("gemm", kname, inputs, [node.outputs[0]],
-                                grid, block,
-                                meta={"M": OC, "N": P, "K": K, "with_bias": bool(has_bias),
-                                      "weight_2d": (OC, K), "out_4d": ys,
-                                      "node": node}))
+
+        # One im2col+GEMM pair per image: the column matrix holds a single
+        # CHW image, so batching is an outer loop with explicit element
+        # offsets into x and y (the cols scratch is reused serially). Keeps
+        # the tuned GEMM shape independent of N.
+        for bi in range(n):
+            self.plan.append(Launch(
+                "im2col", "im2col", [x], [cols],
+                ((P + bx - 1) // bx, (K + byd - 1) // byd, 1), (bx, byd, 1),
+                meta={"C": C, "H": H, "W": W, "KH": KH, "KW": KW, "OH": OH, "OW": OW,
+                      "SH": SH, "SW": SW, "PH": PH, "PW": PW, "DH": DH, "DW": DW,
+                      "batch_index": bi, "in_offset": bi * C * H * W}))
+            self.plan.append(Launch(
+                "gemm", kname, inputs, [node.outputs[0]], grid, block,
+                meta={"M": OC, "N": P, "K": K, "with_bias": bool(has_bias),
+                      "weight_2d": (OC, K), "out_4d": ys,
+                      "batch_index": bi, "out_offset": bi * OC * OH * OW,
+                      "node": node}))
+
+    def _lower_depthwise(self, g: Graph, node: Node, *, xs, ws, ys,
+                         SH, SW, PH, PW, DH, DW) -> None:
+        n, C, H, W = xs
+        OC, _, KH, KW = ws
+        _, _, OH, OW = ys
+        mult = OC // C
+        has_bias = len(node.inputs) > 2 and node.inputs[2]
+        activation = node.attrs.get("activation")
+        sched = self.dw_schedule_fn(node, (C, H, W, KH, SH))
+
+        sig = ("dw", C, mult, H, W, OH, OW, KH, KW, SH, SW, PH, PW, DH, DW,
+               sched.key(), bool(has_bias), activation,
+               node.attrs.get("clip_min"), node.attrs.get("clip_max"),
+               node.attrs.get("alpha"), node.attrs.get("beta"))
+        if sig in self._dw_cache:
+            kname = self._dw_cache[sig]
+        else:
+            kname = f"dw_{sched.key()}_{activation or 'none'}_{len(self._dw_cache)}"
+            _, src = T.depthwise_conv_kernel(
+                kname, C=C, mult=mult, H=H, W=W, OH=OH, OW=OW,
+                KH=KH, KW=KW, SH=SH, SW=SW, PH=PH, PW=PW, DH=DH, DW=DW,
+                tile_h=sched.tile_h, tile_w=sched.tile_w,
+                with_bias=bool(has_bias), activation=activation,
+                attrs=node.attrs, direct_load=sched.direct_load)
+            self.kernels[kname] = src
+            self._dw_cache[sig] = kname
+
+        grid = ((OW + sched.tile_w - 1) // sched.tile_w,
+                (OH + sched.tile_h - 1) // sched.tile_h,
+                n * OC)
+        inputs = [node.inputs[0], node.inputs[1]] + \
+                 ([node.inputs[2]] if has_bias else [])
+        self.plan.append(Launch(
+            "depthwise", kname, inputs, [node.outputs[0]],
+            grid, (sched.threads_per_block(), 1, 1),
+            meta={"out_4d": ys, "node": node}))
+
+    def _lower_grouped(self, g: Graph, node: Node, *, xs, ws, ys, group,
+                       SH, SW, PH, PW, DH, DW) -> None:
+        n, C, H, W = xs
+        OC, Cg, KH, KW = ws            # Cg == C // group
+        _, _, OH, OW = ys
+        OCg = OC // group
+        has_bias = len(node.inputs) > 2 and node.inputs[2]
+        activation = node.attrs.get("activation")
+
+        if not self._has_im2col:
+            nm, src = T.im2col_kernel("im2col")
+            self.kernels[nm] = src
+            self._has_im2col = True
+
+        Kg = Cg * KH * KW
+        P = OH * OW
+        cols = node.outputs[0] + "__cols"
+        self.scratch[cols] = (Kg, P)
+        bx, byd = 16, 16
+        kname = self._emit_gemm(OCg, P, Kg, with_bias=bool(has_bias),
+                                bias_mode="row", activation=activation,
+                                attrs=node.attrs)
+        sched = self.schedule_fn(None, (OCg, P, Kg))
+        grid, block = self._grid_block_gemm(OCg, P, sched)
+        inputs = [node.inputs[1], cols] + ([node.inputs[2]] if has_bias else [])
+
+        for bi in range(n):
+            for gi in range(group):
+                self.plan.append(Launch(
+                    "im2col", "im2col", [node.inputs[0]], [cols],
+                    ((P + bx - 1) // bx, (Kg + byd - 1) // byd, 1), (bx, byd, 1),
+                    meta={"C": Cg, "H": H, "W": W, "KH": KH, "KW": KW,
+                          "OH": OH, "OW": OW, "SH": SH, "SW": SW,
+                          "PH": PH, "PW": PW, "DH": DH, "DW": DW,
+                          "batch_index": bi, "c_range": (gi * Cg, (gi + 1) * Cg),
+                          "in_offset": (bi * C + gi * Cg) * H * W}))
+                self.plan.append(Launch(
+                    "gemm", kname, inputs, [node.outputs[0]], grid, block,
+                    meta={"M": OCg, "N": P, "K": Kg, "with_bias": bool(has_bias),
+                          "weight_2d": (OC, Kg), "w_rows": (gi * OCg, (gi + 1) * OCg),
+                          "out_4d": ys, "batch_index": bi,
+                          "oc_range": (gi * OCg, (gi + 1) * OCg),
+                          "out_offset": (bi * OC + gi * OCg) * OH * OW,
+                          "node": node}))
+
+    def _is_hw_mean(self, g: Graph, node: Node) -> bool:
+        """True when this ReduceMean is a spatial mean over H,W of an NCHW
+        tensor (both SE squeezes and classifier-head pooling)."""
+        try:
+            xs = self._shape(g, node.inputs[0])
+        except ValueError:
+            return False
+        if len(xs) != 4:
+            return False
+        axes = node.attrs.get("axes")
+        if axes is None and len(node.inputs) > 1 and node.inputs[1]:
+            if not g.is_constant(node.inputs[1]):
+                return False
+            axes = g.initializers[node.inputs[1]].tolist()
+        if axes is None:
+            return False
+        return sorted(int(a) % 4 for a in np.atleast_1d(axes)) == [2, 3]
+
+    def _lower_reduce_hw(self, g: Graph, node: Node) -> None:
+        xs = self._shape(g, node.inputs[0])       # (N, C, H, W)
+        n, C, H, W = xs
+        block = 128
+        sig = ("reduce_hw", H * W, block)
+        if sig in self._reduce_cache:
+            kname = self._reduce_cache[sig]
+        else:
+            kname = f"reduce_mean_hw_{len(self._reduce_cache)}"
+            _, src = T.reduce_mean_hw_kernel(kname, HW=H * W, block=block)
+            self.kernels[kname] = src
+            self._reduce_cache[sig] = kname
+        self.plan.append(Launch(
+            "reduce", kname, [node.inputs[0]], [node.outputs[0]],
+            (n * C, 1, 1), (block, 1, 1),
+            meta={"out_shape": self._shape(g, node.outputs[0]),
+                  "out_n": n * C, "node": node}))
+
+    def _lower_maxpool(self, g: Graph, node: Node) -> None:
+        xs = self._shape(g, node.inputs[0])
+        ys = self._shape(g, node.outputs[0])
+        n, C, H, W = xs
+        _, _, OH, OW = ys
+        a = node.attrs
+        KH, KW = a["kernel_shape"]
+        SH, SW = a.get("strides", [1, 1])
+        pads = a.get("pads") or [0, 0, 0, 0]
+        DH, DW = a.get("dilations", [1, 1])
+        total = n * C * OH * OW
+        block = 128
+        kname = f"maxpool_{len([k for k in self.kernels if k.startswith('maxpool')])}"
+        _, src = T.maxpool_kernel(kname, H=H, W=W, OH=OH, OW=OW, KH=KH, KW=KW,
+                                  SH=SH, SW=SW, PH=pads[0], PW=pads[1],
+                                  DH=DH, DW=DW, total=total, block=block)
+        self.kernels[kname] = src
+        self.plan.append(Launch(
+            "pool", kname, [node.inputs[0]], [node.outputs[0]],
+            ((total + block - 1) // block, 1, 1), (block, 1, 1),
+            meta={"out_shape": ys, "out_n": total, "node": node}))
 
     def _lower_gemm(self, g: Graph, node: Node) -> None:
         a = node.attrs
@@ -244,22 +438,29 @@ class CudaCodegen:
                                       "node": node}))
 
     def _lower_elementwise(self, g: Graph, node: Node) -> None:
-        # Fuse only if every external input matches the output element count and
-        # any constant operands are scalar; otherwise fall back to host.
+        # Every external input must be a compile-time scalar or a static shape
+        # broadcastable to the output (stride-0 indexing on broadcast dims);
+        # every group output must be output-shaped. Anything else -> host.
         out_shape = self._shape(g, node.outputs[0])
         out_n = int(np.prod(out_shape))
         scalar_consts: dict[str, float] = {}
+        input_shapes: dict[str, tuple] = {}
         ok = True
         for e in self._ext_inputs(node):
-            if g.is_constant(e):
-                arr = g.initializers[e]
-                if arr.size == 1:
-                    scalar_consts[e] = float(arr.reshape(()))
-                else:
-                    ok = False
-                    break
-            else:
-                if int(np.prod(self._shape(g, e))) != out_n:
+            shape = (tuple(g.initializers[e].shape) if g.is_constant(e)
+                     else self._shape(g, e))
+            if g.is_constant(e) and g.initializers[e].size == 1:
+                scalar_consts[e] = float(g.initializers[e].reshape(()))
+                continue
+            try:
+                T.broadcast_index_expr(shape, out_shape)
+            except ValueError:
+                ok = False
+                break
+            input_shapes[e] = shape
+        if ok:
+            for o in node.outputs:
+                if int(np.prod(self._shape(g, o))) != out_n:
                     ok = False
                     break
         if not ok:
@@ -269,13 +470,16 @@ class CudaCodegen:
 
         name = f"fused_ew_{self._ew_count}"
         self._ew_count += 1
-        kname, src, ext = T.elementwise_kernel(name, node, scalar_consts=scalar_consts)
+        kname, src, ext = T.elementwise_kernel(
+            name, node, scalar_consts=scalar_consts,
+            input_shapes=input_shapes, out_shape=out_shape)
         self.kernels[kname] = src
         block = 128
         grid = ((out_n + block - 1) // block, 1, 1)
         self.plan.append(Launch("elementwise", kname, ext, list(node.outputs),
                                 grid, (block, 1, 1),
-                                meta={"N": out_n, "node": node, "scalar_consts": scalar_consts}))
+                                meta={"N": out_n, "out_shape": out_shape, "node": node,
+                                      "scalar_consts": scalar_consts}))
 
     def _ext_inputs(self, node: Node) -> list[str]:
         sub = node.attrs["subgraph"]
@@ -289,5 +493,6 @@ class CudaCodegen:
         return ext
 
 
-def emit_cuda_module(graph: Graph, schedule_fn: Optional[ScheduleFn] = None) -> CudaModule:
-    return CudaCodegen(schedule_fn).lower(graph)
+def emit_cuda_module(graph: Graph, schedule_fn: Optional[ScheduleFn] = None,
+                     dw_schedule_fn=None) -> CudaModule:
+    return CudaCodegen(schedule_fn, dw_schedule_fn).lower(graph)

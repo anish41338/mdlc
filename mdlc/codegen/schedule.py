@@ -67,3 +67,50 @@ def gemm_search_space(*, max_smem: int = 48 * 1024) -> Iterator[GemmSchedule]:
 
 # A robust default that works across shapes without tuning.
 DEFAULT_GEMM = GemmSchedule(BM=64, BN=64, BK=16, TM=4, TN=4)
+
+
+@dataclass(frozen=True)
+class DepthwiseSchedule:
+    """Tiling schedule for the direct depthwise conv.
+
+    A block computes a ``tile_h x tile_w`` patch of one (n, c_out) output
+    plane with one thread per output pixel; ``direct_load`` bypasses the
+    shared-memory input staging (profitable when the halo re-read is cheap
+    relative to the barrier, e.g. tiny tiles or stride 2).
+    """
+
+    tile_h: int = 8
+    tile_w: int = 8
+    direct_load: bool = False
+
+    def threads_per_block(self) -> int:
+        return self.tile_h * self.tile_w
+
+    def is_valid(self, *, max_threads: int = 1024) -> bool:
+        if self.tile_h <= 0 or self.tile_w <= 0:
+            return False
+        return 32 <= self.threads_per_block() <= max_threads
+
+    def smem_bytes(self, K: int, stride: int, dilation: int = 1,
+                   dtype_bytes: int = 4) -> int:
+        smh = (self.tile_h - 1) * stride + (K - 1) * dilation + 1
+        smw = (self.tile_w - 1) * stride + (K - 1) * dilation + 1
+        return (smh * smw + K * K) * dtype_bytes
+
+    def key(self) -> str:
+        return f"TH{self.tile_h}_TW{self.tile_w}_{'dl' if self.direct_load else 'sm'}"
+
+
+def depthwise_search_space(*, max_threads: int = 256) -> Iterator[DepthwiseSchedule]:
+    """Tuner knobs per the brief: tile_h/tile_w in {4,8,16,32}, smem vs direct
+    load. Thread count capped (sim spawns an OS thread per CUDA thread, and
+    >256 threads/block rarely wins for a one-pixel-per-thread kernel)."""
+    for th in (4, 8, 16, 32):
+        for tw in (4, 8, 16, 32):
+            for dl in (False, True):
+                s = DepthwiseSchedule(th, tw, dl)
+                if s.is_valid(max_threads=max_threads):
+                    yield s
+
+
+DEFAULT_DEPTHWISE = DepthwiseSchedule(tile_h=8, tile_w=8, direct_load=False)

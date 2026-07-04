@@ -24,6 +24,7 @@ from mdlc.passes.base import Pass
 ELEMENTWISE = {
     "Add", "Sub", "Mul", "Div",
     "Relu", "Clip", "Sigmoid", "Tanh", "HardSwish", "HardSigmoid", "LeakyRelu",
+    "Erf",   # GELU decomposes to Div-Erf-Add-Mul-Mul at opset 17
 }
 
 

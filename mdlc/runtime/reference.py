@@ -133,6 +133,12 @@ class ReferenceExecutor:
                                     ceil_mode=a.get("ceil_mode", 0))]
         if op == "GlobalAveragePool":
             return [ops.global_average_pool(ins[0])]
+        if op == "ReduceMean":
+            # opset<18: axes attribute; opset>=18: axes as optional input[1]
+            axes = ins[1] if len(ins) > 1 and ins[1] is not None else a.get("axes")
+            return [ops.reduce_mean(ins[0], axes, a.get("keepdims", 1))]
+        if op == "Erf":
+            return [ops.erf(ins[0])]
         if op in ("Relu", "Sigmoid", "Tanh", "HardSwish"):
             return [_act(op, ins[0], a)]
         if op == "Clip":

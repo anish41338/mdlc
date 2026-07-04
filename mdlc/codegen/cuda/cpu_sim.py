@@ -19,6 +19,7 @@ the win32 (non-POSIX) GCC threading model, where ``std::thread`` is absent.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -109,17 +110,48 @@ static void save_floats(const char* path, const float* p, long n) {
 """
 
 
+def _cache_dir() -> str:
+    d = os.environ.get("MDLC_SIM_CACHE") or os.path.join(
+        os.path.expanduser("~"), ".cache", "mdlc-sim")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _compile_cached(cpp_source: str) -> str:
+    """Compile a sim harness once per distinct source; reuse the exe after.
+
+    Whole-model simulation issues hundreds of launches whose sources repeat
+    (same kernel, different data), and parity sweeps compile many small
+    variants — content-addressed caching turns ~1s of g++ per launch into a
+    one-time cost. Keyed by source hash; exe written atomically so concurrent
+    pytest workers can share the cache.
+    """
+    key = hashlib.sha256(cpp_source.encode()).hexdigest()[:24]
+    exe_path = os.path.join(_cache_dir(), f"sim_{key}.exe")
+    if os.path.exists(exe_path):
+        return exe_path
+    with tempfile.TemporaryDirectory() as bd:
+        src_path = os.path.join(bd, "kernel_test.cpp")
+        tmp_exe = os.path.join(bd, "kernel_test.exe")
+        with open(src_path, "w") as f:
+            f.write(cpp_source)
+        cc = subprocess.run(
+            ["g++", "-O2", "-std=c++14", src_path, "-o", tmp_exe],
+            capture_output=True, text=True,
+        )
+        if cc.returncode != 0:
+            raise RuntimeError(f"g++ failed:\n{cc.stderr}")
+        try:
+            os.replace(tmp_exe, exe_path)
+        except OSError:
+            # Another worker won the race; theirs is identical.
+            if not os.path.exists(exe_path):
+                raise
+    return exe_path
+
+
 def _compile_and_run(cpp_source: str, workdir: str) -> None:
-    src_path = os.path.join(workdir, "kernel_test.cpp")
-    exe_path = os.path.join(workdir, "kernel_test.exe")
-    with open(src_path, "w") as f:
-        f.write(cpp_source)
-    cc = subprocess.run(
-        ["g++", "-O2", "-std=c++14", src_path, "-o", exe_path],
-        capture_output=True, text=True,
-    )
-    if cc.returncode != 0:
-        raise RuntimeError(f"g++ failed:\n{cc.stderr}")
+    exe_path = _compile_cached(cpp_source)
     run = subprocess.run([exe_path, workdir], capture_output=True, text=True)
     if run.returncode != 0:
         raise RuntimeError(f"kernel run failed (rc={run.returncode}):\n{run.stdout}\n{run.stderr}")
@@ -251,9 +283,79 @@ int main(int argc, char** argv) {{
     return cols.reshape(n_rows, n_cols)
 
 
-def simulate_elementwise(source, kernel_name, ext_inputs, input_arrays, n_outputs):
-    """Compile+run a generated elementwise kernel on CPU; return its outputs."""
-    N = int(input_arrays[0].size)
+def simulate_kernel(source, kernel_name, *, inputs, output_sizes, scalar_args=(),
+                    grid=(1, 1, 1), block=64):
+    """Generic launcher: compile+run any generated kernel on the CPU sim.
+
+    Calling convention (matches all new templates): the kernel takes each
+    input pointer, then each output pointer, then each int scalar, in order.
+    ``grid`` is (gx, gy, gz) — blocks run serially in z, y, x order; ``block``
+    is the flat thread count (kernels derive 2D/3D thread coords from
+    ``threadIdx.x`` themselves so the identical source runs under NVRTC with
+    1-D blocks). Returns the output arrays (flat float32).
+    """
+    gx, gy, gz = grid
+    n_in = len(inputs)
+    n_out = len(output_sizes)
+
+    with tempfile.TemporaryDirectory() as wd:
+        for i, arr in enumerate(inputs):
+            _dump(wd, f"in{i}", np.ascontiguousarray(arr, dtype=np.float32))
+        loads = "\n    ".join(
+            f'auto in{i} = load_floats((dir+"/in{i}.bin").c_str(), {int(np.asarray(inputs[i]).size)}L);'
+            for i in range(n_in))
+        out_decls = "\n    ".join(
+            f"std::vector<float> out{j}({int(output_sizes[j])}L, 0.0f);"
+            for j in range(n_out))
+        glob = "\n".join([f"static const float* g_in{i};" for i in range(n_in)] +
+                         [f"static float* g_out{j};" for j in range(n_out)])
+        set_g = "\n    ".join([f"g_in{i} = in{i}.data();" for i in range(n_in)] +
+                              [f"g_out{j} = out{j}.data();" for j in range(n_out)])
+        args = ", ".join([f"g_in{i}" for i in range(n_in)] +
+                         [f"g_out{j}" for j in range(n_out)] +
+                         [str(int(s)) for s in scalar_args])
+        saves = "\n    ".join(
+            f'save_floats((dir+"/out{j}.bin").c_str(), out{j}.data(), {int(output_sizes[j])}L);'
+            for j in range(n_out))
+        main = f"""
+{_SHIM}
+{_prep_kernel(source)}
+
+{glob}
+static void body() {{ {kernel_name}({args}); }}
+
+int main(int argc, char** argv) {{
+    std::string dir = argv[1];
+    {loads}
+    {out_decls}
+    {set_g}
+    blockDim.x = {int(block)}; blockDim.y = 1; blockDim.z = 1;
+    gridDim.x = {gx}; gridDim.y = {gy}; gridDim.z = {gz};
+    g_body = body;
+    for (unsigned bz = 0; bz < {gz}; ++bz)
+      for (unsigned by = 0; by < {gy}; ++by)
+        for (unsigned bx = 0; bx < {gx}; ++bx) {{
+            blockIdx.x = bx; blockIdx.y = by; blockIdx.z = bz;
+            launch_block({int(block)});
+        }}
+    {saves}
+    return 0;
+}}
+"""
+        _compile_and_run(main, wd)
+        outs = [np.fromfile(os.path.join(wd, f"out{j}.bin"), dtype=np.float32)
+                for j in range(n_out)]
+    return outs
+
+
+def simulate_elementwise(source, kernel_name, ext_inputs, input_arrays, n_outputs,
+                         out_n=None):
+    """Compile+run a generated elementwise kernel on CPU; return its outputs.
+
+    ``out_n`` is the output element count (defaults to the first input's size;
+    pass it explicitly when inputs are broadcast and smaller than the output).
+    """
+    N = int(out_n) if out_n is not None else int(input_arrays[0].size)
     block = 128
     grid = (N + block - 1) // block
 
@@ -261,7 +363,8 @@ def simulate_elementwise(source, kernel_name, ext_inputs, input_arrays, n_output
         for i, arr in enumerate(input_arrays):
             _dump(wd, f"in{i}", arr)
         loads = "\n    ".join(
-            f'auto in{i} = load_floats((dir+"/in{i}.bin").c_str(), N);'
+            f'auto in{i} = load_floats((dir+"/in{i}.bin").c_str(), '
+            f'{int(np.asarray(input_arrays[i]).size)}L);'
             for i in range(len(input_arrays)))
         out_decls = "\n    ".join(
             f"std::vector<float> out{j}(N, 0.0f);" for j in range(n_outputs))
