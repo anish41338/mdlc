@@ -106,6 +106,91 @@ def test_tuner_caches_per_shape(tmp_path):
     assert tuner.report_lines()
 
 
+def test_noisy_default_baseline_is_none_not_inf(tmp_path):
+    """A noisy naive baseline must surface as None everywhere — not inf in the
+    TuneResult, not "won nan%" in reports, not a bare `Infinity` token in the
+    committed JSON cache (that is not valid JSON). Regression: the first T4
+    tuning run produced `naive inf, won nan%` for one depthwise shape whose
+    baseline timing was rejected by the noise gate."""
+    import json as json_
+
+    from mdlc.autotuner.tuner import (
+        _GEMM_KNOBS,
+        NOISE_GATE,
+        TuneResult,
+        _search,
+    )
+    from mdlc.codegen.schedule import DEFAULT_GEMM, gemm_search_space
+
+    def evaluate(s):
+        # the default is always too noisy; every other config measures clean
+        if s == DEFAULT_GEMM:
+            return 1.0, NOISE_GATE * 2
+        return analytical_cost(s, 64, 64, 64), 0.0
+
+    scored, default_metric, discarded = _search(
+        list(gemm_search_space()), DEFAULT_GEMM, evaluate,
+        budget=8, seed=0, knobs=_GEMM_KNOBS, make=GemmSchedule,
+        is_valid=lambda s: s.is_valid())
+    assert default_metric is None
+    assert discarded == 1          # the default counts once despite the retry
+    best, best_metric = scored[0]
+
+    res = TuneResult(key="k", best=best, best_metric=best_metric,
+                     default_metric=default_metric, measured=True,
+                     n_evaluated=len(scored))
+    assert res.win_pct is None
+
+    # report formatting: n/a, never nan/inf
+    t = Tuner(cache=AutotuneCache(os.path.join(tmp_path, "unused.json")))
+    t.log.append(res)
+    line = t.report_lines()[0]
+    assert "n/a" in line and "nan" not in line and "inf" not in line
+
+    # cache boundary: a non-finite baseline is stored as null and the file
+    # stays strict JSON (no Infinity/NaN tokens)
+    path = os.path.join(tmp_path, "c.json")
+    cache = AutotuneCache(path)
+    cache.put(64, 64, 64, best, best_metric, measured=True, arch="sm_75",
+              default_metric=float("inf"))
+    cache.save()
+    text = open(path).read()
+    assert "Infinity" not in text and "NaN" not in text
+    assert json_.loads(text)["gemm|f32|64x64x64|sm_75"]["default_metric"] is None
+
+
+def test_all_configs_noisy_degrades_to_default_instead_of_crashing():
+    """If the noise gate rejects *every* config (a busy shared GPU), tuning must
+    return the default schedule, not raise IndexError off an empty result list
+    — a 40-minute tuning run cannot die because the card was contended."""
+    from mdlc.autotuner.tuner import NOISE_GATE
+    from mdlc.codegen.schedule import DEFAULT_DEPTHWISE, DEFAULT_GEMM
+
+    def all_noisy(_s):
+        return 1.0, NOISE_GATE * 2
+
+    import mdlc.autotuner.tuner as T
+
+    class _FakeCtx:
+        arch = "sm_75"
+
+    orig_g, orig_d = T._measure_gemm, T._measure_depthwise
+    T._measure_gemm = lambda s, M, N, K, ctx, rng: all_noisy(s)
+    T._measure_depthwise = lambda s, sig, ctx, rng: all_noisy(s)
+    try:
+        res = tune_gemm(64, 64, 64, budget=6, ctx=_FakeCtx())
+        assert res.best == DEFAULT_GEMM and res.best.is_valid()
+        assert res.best_metric is None and res.win_pct is None
+
+        sig = dict(C=32, mult=1, H=56, W=56, OH=56, OW=56,
+                   KH=3, KW=3, SH=1, SW=1, PH=1, PW=1)
+        rd = tune_depthwise(sig, budget=6, ctx=_FakeCtx())
+        assert rd.best == DEFAULT_DEPTHWISE
+        assert rd.best_metric is None
+    finally:
+        T._measure_gemm, T._measure_depthwise = orig_g, orig_d
+
+
 @requires_gpp
 def test_tuned_schedule_flows_through_codegen_and_sim(tmp_path):
     """A non-default cached schedule must reach the emitted kernel AND the

@@ -8,7 +8,8 @@ Two modes:
 
 * ``python -m mdlc.tools.benchmark --suite --out artifacts/gpu_run_X`` — the
   full matrix for docs/BENCHMARKS.md: models × batch {1,8} × systems
-  {mdlc (tuned), PyTorch eager, ONNX Runtime CUDA EP}, 200 timed iterations
+  {mdlc (tuned), PyTorch eager, torch.compile/Inductor, ONNX Runtime CUDA EP},
+  200 timed iterations
   after 50 warmups, median/p10/p90, kernel-launch counts, device memory, full
   environment capture. Everything lands in a machine-readable JSON — numbers
   in docs are *generated* from these artifacts, never typed by hand.
@@ -27,6 +28,12 @@ Methodology (stated in every artifact):
 The honest expectation: beat PyTorch *eager* at batch-1 on small models (we
 erase per-op dispatch/launch overhead via fusion), lose to ORT CUDA EP on
 conv-heavy graphs (cuDNN algo selection), and quantify the gap.
+
+On baselines: eager is the *soft* comparison — it pays Python dispatch per op,
+precisely the overhead a compiler exists to remove, so beating it is necessary
+but not sufficient. ``torch.compile`` (Inductor) and the ORT CUDA EP are the
+comparisons that actually rank this work, which is why both are in the matrix
+even though we expect to lose some of those rows.
 """
 
 from __future__ import annotations
@@ -176,6 +183,14 @@ def bench_ort_cuda(model_path: str, batch: int) -> dict:
     so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     sess = ort.InferenceSession(model.SerializeToString(), so,
                                 providers=["CUDAExecutionProvider"])
+    # ORT *warns and falls back to CPU* when the CUDA EP can't load. A CPU
+    # timing must never be recorded under the "ort-cuda" label, so verify the
+    # session actually bound the CUDA EP before timing anything.
+    if sess.get_providers()[0] != "CUDAExecutionProvider":
+        raise RuntimeError(
+            f"CUDAExecutionProvider not bound (got {sess.get_providers()}); "
+            "the installed onnxruntime has no usable CUDA EP on this machine "
+            "(see the ORT install fallback in tools/kaggle_run.sh)")
     inp = sess.get_inputs()[0]
     shape = [batch if isinstance(d, str) or d is None else d for d in inp.shape]
     if shape[0] != batch:
@@ -256,6 +271,47 @@ def bench_torch_eager(model_path: str, batch: int, res: int = 224) -> dict:
     return out
 
 
+def bench_torch_compile(model_path: str, batch: int, res: int = 224) -> dict:
+    """PyTorch 2 ``torch.compile`` (TorchInductor) — the compiler-vs-compiler
+    baseline.
+
+    Eager alone is a soft comparison: it pays Python dispatch per op, which is
+    exactly the overhead a compiler removes, so beating it is necessary but not
+    sufficient. Inductor does the same job as mdlc — graph capture, fusion,
+    generated GPU kernels, autotuning — so this is the number that says whether
+    the compiler is actually good rather than merely a compiler.
+
+    Compilation happens during warmup and is excluded from the timed loop
+    (``mode="max-autotune"`` so Inductor gets its best settings, matching the
+    ``cudnn.benchmark=True`` courtesy given to eager).
+    """
+    import torch
+    torch.backends.cudnn.benchmark = True
+    m = _torch_model_for(model_path).cuda().eval()
+    x = torch.from_numpy(_seeded_input((batch, 3, res, res))).cuda()
+    compiled = torch.compile(m, mode="max-autotune")
+    torch.cuda.reset_peak_memory_stats()
+    start = torch.cuda.Event(enable_timing=True)
+    stop = torch.cuda.Event(enable_timing=True)
+    samples = []
+    with torch.no_grad():
+        for _ in range(WARMUP):      # includes the (excluded) compile itself
+            compiled(x)
+        torch.cuda.synchronize()
+        for _ in range(ITERS):
+            start.record()
+            compiled(x)
+            stop.record()
+            torch.cuda.synchronize()
+            samples.append(start.elapsed_time(stop))
+    out = _pcts(samples)
+    out.update({"system": "torch-compile", "timing": "cuda_events",
+                "device_bytes": int(torch.cuda.max_memory_allocated()),
+                "mode": "max-autotune",
+                "torch_version": torch.__version__})
+    return out
+
+
 def _torch_kernel_count(m, x):
     """Count CUDA kernel launches for one forward via torch.profiler; None if
     profiling is unavailable (older builds)."""
@@ -294,6 +350,7 @@ def run_suite(models: list[str], batches: list[int], out_dir: str,
                 ("mdlc", lambda: bench_mdlc(model, batch, tune_cache=tune_cache,
                                             ctx=ctx)),
                 ("torch-eager", lambda: bench_torch_eager(model, batch)),
+                ("torch-compile", lambda: bench_torch_compile(model, batch)),
                 ("ort-cuda", lambda: bench_ort_cuda(model, batch)),
             ):
                 try:

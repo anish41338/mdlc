@@ -4,47 +4,53 @@
 T4 notebook (see `tools/kaggle_notebook.md` for copy-paste cells) and commits
 the artifacts back. When this file is empty, Phase 2 GPU work is done.*
 
-## Run 1 status: attempted 2026-07-25 on a Kaggle **P100 (sm_60)**, not a T4
+## Run 1 — DONE (2026-07-25, Kaggle **Tesla T4, sm_75**)
 
-Got as far as proving the device path had never executed. Three blockers found
-and fixed on the CPU side (see docs/GAPS.md "Phase 2 pre-flight"): the `gpu`
-marker matched no tests; emitted source `#include`d a toolkit header NVRTC
-cannot open; and `transA`/`transB` were applied only by the simulator, so the
-GPU path silently computed wrong results for every `nn.Linear` head. Re-run the
-checklist below now that those are fixed.
+`artifacts/gpu_run_20260725_162618/`. **Phase 2's device gate is met**: the
+kernels execute on real hardware and agree with the oracle.
 
-Note the accelerator may be a **P100 (sm_60)**, not the T4 (sm_75) this runbook
-assumed. Consequences: NVRTC emits `compute_60` and warns that pre-`sm_75`
-architectures are deprecated (harmless); Kaggle's preinstalled PyTorch supports
-only `sm_70+`, so **torch cannot use that GPU** — mdlc goes through raw
-NVRTC/driver calls and is unaffected, but the `torch eager` benchmark column
-will not be collectable on a P100. `__dp4a` needs sm_61+, so the Phase 3 INT8
-path also cannot be validated on a P100. Prefer a T4 session for the benchmark
-and INT8 runs; a P100 is fine for correctness (`pytest -m gpu`).
+- [x] 1. `bash tools/kaggle_run.sh` completed end to end.
+- [x] 2. `pytest -q -m gpu` — **24/24 passed** on the T4, and again on a P100
+      (sm_60) earlier the same day: depthwise, grouped conv, batch-N conv
+      offsets, reduce/pool/views, the pooled-memory executor, and MobileNetV2 +
+      RepViT end-to-end against the ORT golden. None of the pre-flagged risk
+      spots (NVRTC arch flag, >1024-thread launches, pooled-offset binding,
+      per-image pointer math, grouped weight-row slices) actually failed.
+- [x] 3. Autotuning filled the cache on both architectures: 55 GEMM shapes +
+      17 depthwise sigs = **72 entries** per arch, keyed by `sm_arch`.
+- [x] 4. Benchmark matrix ran; `docs/BENCHMARKS.md` regenerated. Numbers in
+      docs/STATUS.md and docs/GAPS.md §11.
 
-## Run 1 — bring-up + tune + first honest benchmark (blocks Phase 2 sign-off)
+### Still to commit from that run
 
-- [ ] 1. Run `bash tools/kaggle_run.sh` on a T4 notebook. It will:
-      - verify NVRTC/driver load and print `Tesla T4 sm_75`,
-      - export the six ONNX files (3 models × batch {1,8}),
-      - run `pytest -q -m gpu` (first-ever device validation of the Phase-1
-        kernels: depthwise, reduce, pool, views, batched conv offsets,
-        pooled-memory executor),
-      - fill `artifacts/tune_cache.json` (≤64 configs/shape, median-of-50,
-        noisy configs discarded),
-      - run the benchmark suite (3 models × batch {1,8} × {mdlc, torch eager,
-        ORT CUDA EP}) into `artifacts/gpu_run_<ts>/bench.json`,
-      - regenerate `docs/BENCHMARKS.md` from that artifact.
-- [ ] 2. Bring back (zip or push): `artifacts/gpu_run_<ts>/` (all JSON/MD/TXT),
-      `artifacts/tune_cache.json`, `docs/BENCHMARKS.md`.
-- [ ] 3. If `pytest -m gpu` failed anywhere, include `pytest_gpu.txt` —
-      expected first-run risk spots (pre-empted but unproven on device):
-      NVRTC arch flag, launch-config bounds >1024 threads, pooled-offset
-      binding, per-image `in_offset/out_offset` pointer math, grouped-conv
-      weight-row slices.
+The artifacts live in the Kaggle zip, not yet in git:
+`artifacts/gpu_run_20260725_162618/` (bench.json, tune.json, logs,
+BENCHMARKS.md), `artifacts/tune_cache.json`, `docs/BENCHMARKS.md`. Commit them
+so every number in the docs is backed by a file in the repo.
 
-## Nothing else is GPU-blocked right now
+## Run 2 — OPTIONAL, buys exactly one thing: the ORT-CUDA baseline column
 
-INT8/DP4A (Phase 3) will add: AIMET quantization of RepViT (needs torch+aimet
-on Kaggle), `pytest -m gpu` for DP4A kernels, and an int8-vs-fp32 latency row.
-Those items land here once the CPU-side code exists.
+Nothing is blocked on this. Both Run-1 attempts hit the same wall: the PyPI
+`onnxruntime-gpu` wheel is built against **CUDA 13** (`libcudart.so.13`) and
+the Kaggle image ships CUDA 12, so the CUDA EP never loaded — every `ort-cuda`
+row is an error and the torch-eager comparison is the only baseline we have.
+
+`tools/kaggle_run.sh` now tries three things in order, verifying each by
+*running* a CUDA session (ORT silently falls back to CPU otherwise, and a CPU
+timing recorded as "ort-cuda" would be a lie):
+
+1. the default wheel (works if the image ever ships cudart 13),
+2. the CUDA-12 build from ORT's official feed, run against the CUDA 12 runtime
+   that torch's bundled `nvidia-*` wheels already provide (`LD_LIBRARY_PATH` is
+   pointed at them),
+3. the CPU build — the parity oracle is mandatory, the baseline column is not.
+
+`bench_ort_cuda` now asserts the CUDA EP is actually bound before timing.
+
+Re-run only if you want that column. Everything else from Run 1 stands.
+
+## Phase 3 (INT8/DP4A) — when the CPU-side code is ready
+
+Will add: AIMET quantization of RepViT (needs torch+aimet on Kaggle),
+`pytest -m gpu` coverage for the DP4A kernels, and an int8-vs-fp32 latency row.
+**Requires sm_61+ for `__dp4a`** — a T4 (sm_75) is fine, a P100 (sm_60) is not.

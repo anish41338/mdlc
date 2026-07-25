@@ -14,20 +14,67 @@ mkdir -p "$OUT"
 nvidia-smi | tee "$OUT/nvidia_smi.txt"
 python -m pip install -q -e ".[ref,dev]"
 python -m pip install -q timm onnxscript   # torch/torchvision preinstalled on Kaggle
-python -m pip install -q onnxruntime-gpu || true
 
-# onnxruntime-gpu wheels are built against a specific CUDA runtime: the current
-# one wants libcudart.so.13, which this image does not ship, so `import
-# onnxruntime` dies with an ImportError. That oracle is what every parity check
-# and per-pass verifier uses, so fall back to the CPU build rather than run
-# unverified. Costs the ORT-CUDA baseline column (recorded as an error row),
-# never the correctness of our own numbers.
-if ! python -c "import onnxruntime" 2>/dev/null; then
-    echo "WARNING: onnxruntime-gpu unusable here; falling back to CPU onnxruntime"
-    python -m pip uninstall -q -y onnxruntime-gpu || true
-    python -m pip install -q --force-reinstall onnxruntime
-    python -c "import onnxruntime as o; print('onnxruntime', o.__version__, o.get_available_providers())"
+# ---- ONNX Runtime: the CPU oracle is mandatory, the CUDA EP best-effort ----
+# The PyPI onnxruntime-gpu wheel is built against CUDA 13 (needs
+# libcudart.so.13); Kaggle images ship CUDA 12, so `import onnxruntime` dies.
+# But torch's bundled nvidia-* wheels carry the full CUDA 12 runtime (cudart,
+# cublas, cudnn, cufft, ...) — not on the loader path by default. Expose them,
+# then try wheels in order, verifying each by *running* a CUDA session (ORT
+# lists/falls back silently, so only a bound session proves anything).
+NVIDIA_LIBS=$(python - <<'PY'
+import glob, os, sysconfig
+site = sysconfig.get_paths()["purelib"]
+print(":".join(sorted(glob.glob(os.path.join(site, "nvidia", "*", "lib")))))
+PY
+)
+export LD_LIBRARY_PATH="${NVIDIA_LIBS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+ort_cuda_ok() {
+    python - <<'PY'
+import sys
+try:
+    import numpy as np
+    from onnx import TensorProto, helper
+    import onnxruntime as ort
+    g = helper.make_graph(
+        [helper.make_node("Identity", ["x"], ["y"])], "probe",
+        [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1])],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1])])
+    m = helper.make_model(g, opset_imports=[helper.make_opsetid("", 17)])
+    m.ir_version = 9
+    sess = ort.InferenceSession(m.SerializeToString(),
+                                providers=["CUDAExecutionProvider"])
+    assert sess.get_providers()[0] == "CUDAExecutionProvider", sess.get_providers()
+    sess.run(None, {"x": np.zeros(1, np.float32)})
+    print("ORT CUDA EP OK:", ort.__version__)
+except Exception as e:
+    print("ORT CUDA EP unavailable:", type(e).__name__, e)
+    sys.exit(1)
+PY
+}
+
+# Attempt 1: default PyPI wheel (CUDA 13 — works only if the image has cudart 13).
+python -m pip install -q onnxruntime-gpu || true
+if ! ort_cuda_ok; then
+    # Attempt 2: the CUDA-12 build from the official ORT feed, running against
+    # torch's bundled nvidia libs exposed above. --no-deps so pip cannot churn
+    # numpy/protobuf; ORT's own small deps are ensured explicitly.
+    echo "trying the CUDA-12 onnxruntime-gpu build"
+    python -m pip uninstall -q -y onnxruntime-gpu onnxruntime || true
+    python -m pip install -q coloredlogs flatbuffers || true
+    python -m pip install -q --no-deps onnxruntime-gpu \
+      --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/ || true
 fi
+if ! ort_cuda_ok; then
+    # Fallback: CPU build. The oracle behind every parity check must exist —
+    # running unverified is not an option. Costs only the ORT-CUDA baseline
+    # column, which the benchmark records as an error row.
+    echo "WARNING: no CUDA-capable onnxruntime; installing the CPU build (oracle only)"
+    python -m pip uninstall -q -y onnxruntime-gpu onnxruntime || true
+    python -m pip install -q --no-deps --force-reinstall onnxruntime
+fi
+python -c "import onnxruntime as o; print('onnxruntime', o.__version__, o.get_available_providers())"
 python - <<'EOF'
 from mdlc.codegen.cuda.nvrtc_runtime import cuda_available, CudaContext
 assert cuda_available(), "CUDA driver/NVRTC not found - is the GPU accelerator on?"

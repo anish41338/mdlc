@@ -50,6 +50,22 @@ def harvest(models: list[str]) -> tuple[set, list]:
     return gemms, dws
 
 
+def _best_str(res) -> str:
+    """Both metrics can be legitimately missing on a shared GPU: the noise gate
+    can reject the baseline's own sample, or (rarely) every config."""
+    if res.best_metric is None:
+        return "no config measurable (kept default)"
+    return f"{res.best.key()} {res.best_metric:.4f} ms"
+
+
+def _naive_str(res) -> str:
+    if res.default_metric is None:
+        return "naive n/a (baseline noisy)"
+    if res.win_pct is None:
+        return f"naive {res.default_metric:.4f}"
+    return f"naive {res.default_metric:.4f}, won {res.win_pct:.1f}%"
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("models", nargs="*", default=None)
@@ -80,8 +96,8 @@ def main(argv=None) -> int:
         cache.put(M, N, K, res.best, res.best_metric, res.measured,
                   arch=ctx.arch, default_metric=res.default_metric)
         cache.save()   # crash-safe: every result lands immediately
-        print(f"  gemm {M}x{N}x{K}: {res.best.key()} {res.best_metric:.4f} ms "
-              f"(naive {res.default_metric:.4f}, won {res.win_pct:.1f}%, "
+        print(f"  gemm {M}x{N}x{K}: {_best_str(res)} "
+              f"({_naive_str(res)}, "
               f"{res.n_noisy_discarded} noisy discarded)")
         results.append(res)
     for sig in dws:
@@ -91,8 +107,7 @@ def main(argv=None) -> int:
         cache.put_depthwise(sig, res.best, res.best_metric, res.measured,
                             arch=ctx.arch, default_metric=res.default_metric)
         cache.save()
-        print(f"  dw {res.key}: {res.best.key()} {res.best_metric:.4f} ms "
-              f"(naive {res.default_metric:.4f}, won {res.win_pct:.1f}%)")
+        print(f"  dw {res.key}: {_best_str(res)} ({_naive_str(res)})")
         results.append(res)
 
     print(f"cache now has {len(cache.entries)} entries")
@@ -105,7 +120,7 @@ def main(argv=None) -> int:
                 "default_metric_ms": r.default_metric,
                 "win_pct": r.win_pct, "n_evaluated": r.n_evaluated,
                 "n_noisy_discarded": r.n_noisy_discarded,
-            } for r in results], f, indent=2)
+            } for r in results], f, indent=2, allow_nan=False)
         print(f"wrote {args.report}")
     return 0
 

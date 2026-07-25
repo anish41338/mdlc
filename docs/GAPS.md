@@ -163,25 +163,60 @@ tier requires a written numerical justification in that file + human sign-off.
    pre-flight, `_lower_gemm` raises `NotImplementedError` instead of emitting a
    kernel that drops them (`test_gemm_rejects_unapplied_alpha_beta`). Folding
    them into the weights/bias is the real fix.
-2. Memory planner has **no alignment guarantee** — offsets are raw byte
-   sums. Phase 2 GPU bring-up needs 256-byte-aligned pool offsets (vectorized
-   loads + coalescing); add `align=256` to the planner and an assert.
-3. Autotuner on CPU ranks by analytical cost model only (by design); measured
-   tuning is GPU-gated (Phase 2). Depthwise knobs (`DepthwiseSchedule`:
-   tile_h/w ∈ {4,8,16,32}, smem-vs-direct) are defined and sim-tested but not
-   yet searched — the tuner only searches GEMM schedules.
-4. Batched conv costs N× launches (per-image im2col+GEMM pairs) — correct
-   but leaves batch-8 launch-bound; batching the im2col columns (P = N·OH·OW
-   with an output permute, or implicit GEMM) is the Phase 4 fix.
-5. The GPU executor's new-kind handling (depthwise/reduce/pool/view, batched
-   offsets, grouped slices) is written but **not yet device-validated** —
-   first `pytest -m gpu` run on Kaggle T4 is the Phase 2 gate.
+2. ~~Memory planner has no alignment guarantee~~ **closed** — `ALIGN = 256` in
+   `runtime/memory_planner.py`, `GpuExecutor` asserts every pooled offset is
+   256-byte aligned before binding, and the pooled path is covered on device by
+   `test_generated_module_matches_reference_pooled_on_device`.
+3. ~~Autotuner ranks by cost model only; depthwise knobs unsearched~~
+   **closed** — measured tuning ran on T4 (sm_75) and P100 (sm_60): 55 GEMM
+   shapes + 17 depthwise sigs, 72 entries per arch. Depthwise *is* searched
+   (`tune_depthwise`, tile_h/w × smem-vs-direct). CPU-side compiles still use
+   the cost model by design, and now prefer a committed measured entry.
+4. Batched conv costs N× launches (per-image im2col+GEMM pairs) — correct but
+   launch-bound. **Now priced**: batch-8 is 1.85–3.79× slower than torch eager
+   across the three models, versus winning two of three at batch-1 (STATUS.md).
+   Batching the im2col columns (P = N·OH·OW with an output permute) or implicit
+   GEMM is the Phase 4 fix, and this is the number it has to beat.
+5. ~~GPU executor's new-kind handling not device-validated~~ **closed** —
+   `pytest -m gpu` 24/24 on T4 and P100 (2026-07-25). None of the pre-flagged
+   risk spots failed; the real bugs were found by static audit beforehand
+   (see "Phase 2 pre-flight" above), not by the device run.
 6. The reduction kernel uses a shared-memory tree, not warp shuffles: the
    cpu-sim shim has no warp-lockstep to emulate `__shfl_down_sync`. Portable
    and deterministic; a shuffle variant is a labeled Phase-4 tuner option.
 7. No CUDA-graph/stream work; launches are serial (fine — batch-1 latency
    story is fusion + fewer launches).
-8. INT8/DP4A path not started (Phase 3).
+8. INT8/DP4A path not started (Phase 3). Needs sm_61+ for `__dp4a`, so it can
+   be validated on a T4 but not on a P100.
+9. **No ORT-CUDA baseline yet.** Both 2026-07-25 runs failed to load the CUDA
+   EP: the PyPI `onnxruntime-gpu` wheel is built against CUDA 13
+   (`libcudart.so.13`) and the Kaggle image ships CUDA 12. Every `ort-cuda` row
+   is an error, so torch eager is currently the only baseline. `kaggle_run.sh`
+   now tries the CUDA-12 ORT build against torch's bundled `nvidia-*` runtime
+   before falling back to CPU, and `bench_ort_cuda` asserts the EP is actually
+   bound (ORT otherwise falls back to CPU silently — a CPU timing labelled
+   "ort-cuda" would be a fabricated baseline).
+
+## 11. Phase 2 measured results (T4, sm_75, run 20260725_162618)
+
+`pytest -m gpu` 24/24. Tuning: 72 entries/arch, best GEMM win 70.9%
+(`512x49x4608`), depthwise 1.7–26.8%, `576x196x96` won 0.0% (default already
+optimal — the tuner is not fitting noise).
+
+Latency (median ms) vs PyTorch eager, same card:
+
+| Model | b1 mdlc | b1 torch | b8 mdlc | b8 torch |
+|---|---|---|---|---|
+| MobileNetV2 | **2.218** | 5.738 | 13.897 | 7.529 |
+| RepViT-m0_9 | **5.049** | 7.226 | 30.744 | 8.134 |
+| ResNet-18 | 4.440 | 2.748 | 35.749 | 9.438 |
+
+Reading it honestly: we beat eager 2.59× (MobileNetV2) and 1.43× (RepViT) at
+batch-1 — the depthwise-heavy mobile graphs where fusion and launch-count
+reduction pay. We lose ResNet-18 at 1.62×, whose dense 3×3 convs are cuDNN's
+best case, and we lose every batch-8 row by 1.85–3.79× to the per-image launch
+gap (§9.4). No tensor cores, no double-buffering, no CUDA graphs — §9.7 and the
+Phase-4 list are the reasons, and they are now quantified rather than asserted.
 
 ## 10. Phase 1 acceptance — MET
 

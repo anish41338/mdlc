@@ -25,6 +25,7 @@ always evaluated too, so every entry can report "tuning won X% over naive".
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 from dataclasses import dataclass, field
@@ -95,18 +96,24 @@ def depthwise_analytical_cost(sched: DepthwiseSchedule, sig: dict) -> float:
 class TuneResult:
     key: str                    # cache key this result belongs to
     best: object                # GemmSchedule | DepthwiseSchedule
-    best_metric: float          # ms (measured) or cost (modeled)
-    default_metric: float       # same metric for the untuned default schedule
+    best_metric: Optional[float]     # ms (measured) or cost; None = nothing measurable
+    default_metric: Optional[float]  # untuned default; None = baseline too noisy
     measured: bool
     n_evaluated: int
     n_noisy_discarded: int = 0
     ranking: list = field(default_factory=list)   # (schedule.key, metric)
 
     @property
-    def win_pct(self) -> float:
-        """How much tuning beat the naive default, in % of default."""
-        if self.default_metric <= 0:
-            return 0.0
+    def win_pct(self) -> Optional[float]:
+        """How much tuning beat the naive default, in % of default.
+
+        None when there is no usable baseline (the default's own timing was
+        rejected by the noise gate on a shared GPU) — a missing measurement is
+        reported as missing, never as a made-up percentage.
+        """
+        if (self.default_metric is None or self.default_metric <= 0
+                or self.best_metric is None):
+            return None
         return 100.0 * (self.default_metric - self.best_metric) / self.default_metric
 
 
@@ -172,6 +179,12 @@ class AutotuneCache:
             return None
         return DepthwiseSchedule(**e["sched"])
 
+    @staticmethod
+    def _finite_or_none(v: Optional[float]) -> Optional[float]:
+        """JSON boundary guard: json.dump writes bare ``Infinity``/``NaN`` for
+        non-finite floats, which is not JSON. A missing baseline is null."""
+        return v if v is not None and math.isfinite(v) else None
+
     def put(self, M: int, N: int, K: int, sched: GemmSchedule, metric: float,
             measured: bool, arch: Optional[str] = None,
             default_metric: Optional[float] = None) -> None:
@@ -179,8 +192,8 @@ class AutotuneCache:
                               arch or ("model" if not measured else "gpu"))] = {
             "sched": dict(BM=sched.BM, BN=sched.BN, BK=sched.BK,
                           TM=sched.TM, TN=sched.TN),
-            "metric": metric, "measured": measured,
-            "default_metric": default_metric,
+            "metric": self._finite_or_none(metric), "measured": measured,
+            "default_metric": self._finite_or_none(default_metric),
         }
 
     def put_depthwise(self, sig: dict, sched: DepthwiseSchedule, metric: float,
@@ -190,15 +203,17 @@ class AutotuneCache:
                               arch or ("model" if not measured else "gpu"))] = {
             "sched": dict(tile_h=sched.tile_h, tile_w=sched.tile_w,
                           direct_load=sched.direct_load),
-            "metric": metric, "measured": measured,
-            "default_metric": default_metric,
+            "metric": self._finite_or_none(metric), "measured": measured,
+            "default_metric": self._finite_or_none(default_metric),
         }
 
     def save(self) -> None:
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         out = dict(self.entries)
         with open(self.path, "w") as f:
-            json.dump(out, f, indent=2, sort_keys=True)
+            # allow_nan=False: refuse loudly rather than write invalid JSON —
+            # the committed cache must stay readable by any JSON parser.
+            json.dump(out, f, indent=2, sort_keys=True, allow_nan=False)
 
 
 # ----- measurement ----------------------------------------------------------
@@ -329,9 +344,26 @@ def _search(candidates, default, evaluate, *, budget: int, seed: int,
             return
         scored.append((s, metric))
 
-    # the naive default is always evaluated (it anchors the win-% report)
-    try_eval(default)
-    default_metric = scored[0][1] if scored else float("inf")
+    # The naive default is always evaluated (it anchors the win-% report). Its
+    # own sample can be the noisy one on a shared GPU: that used to leave
+    # default_metric = inf, which flowed into the report as "won nan%" and into
+    # the JSON cache as a bare `Infinity`. Retry once; a still-noisy baseline
+    # is recorded as None ("no baseline"), never as a number.
+    default_metric = None
+    default_noisy = False
+    seen.add(default.key())
+    for _ in range(2):
+        try:
+            metric, rel_iqr = evaluate(default)
+        except Exception:
+            break
+        if rel_iqr <= NOISE_GATE:
+            default_metric = metric
+            scored.append((default, metric))
+            break
+        default_noisy = True
+    if default_noisy and default_metric is None:
+        discarded += 1   # the default counts once, however many attempts
 
     n_random = max(1, (budget * 3) // 4)
     for s in pool[:n_random]:
@@ -370,7 +402,7 @@ def tune_gemm(M, N, K, *, budget: int = 64, ctx=None, seed: int = 0) -> TuneResu
         budget=budget, seed=seed, knobs=_GEMM_KNOBS, make=GemmSchedule,
         is_valid=lambda s: s.is_valid() and s.smem_bytes() <= 48 * 1024)
 
-    best, best_metric = scored[0]
+    best, best_metric = scored[0] if scored else (DEFAULT_GEMM, None)
     return TuneResult(
         key=AutotuneCache.key("gemm", gemm_sig(M, N, K),
                               ctx.arch if measured else "model"),
@@ -400,7 +432,10 @@ def tune_depthwise(sig: dict, *, budget: int = 32, ctx=None,
         budget=budget, seed=seed, knobs=_DW_KNOBS, make=DepthwiseSchedule,
         is_valid=lambda s: s.is_valid(max_threads=256))
 
-    best, best_metric = scored[0]
+    # Nothing measurable (every config, default included, rejected as noisy):
+    # keep the default schedule. A tuning run on a busy GPU must degrade to
+    # "untuned", never crash — codegen still needs a valid schedule back.
+    best, best_metric = scored[0] if scored else (DEFAULT_DEPTHWISE, None)
     return TuneResult(
         key=AutotuneCache.key("depthwise", depthwise_sig(sig),
                               ctx.arch if measured else "model"),
@@ -452,9 +487,14 @@ class Tuner:
         lines = []
         for r in self.log:
             unit = "ms" if r.measured else "cost"
+            naive = (f"{r.default_metric:.4g}{unit}"
+                     if r.default_metric is not None else "n/a (noisy)")
+            best = (f"{r.best_metric:.4g}{unit}"
+                    if r.best_metric is not None else "n/a (all noisy)")
+            won = f"{r.win_pct:.1f}%" if r.win_pct is not None else "n/a"
             lines.append(
-                f"  {r.key}: tuned {r.best.key()} {r.best_metric:.4g}{unit} "
-                f"vs naive {r.default_metric:.4g}{unit} -> won {r.win_pct:.1f}%"
+                f"  {r.key}: tuned {r.best.key()} {best} "
+                f"vs naive {naive} -> won {won}"
                 + (f" ({r.n_noisy_discarded} noisy configs discarded)"
                    if r.n_noisy_discarded else ""))
         return lines

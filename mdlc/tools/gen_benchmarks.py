@@ -86,7 +86,7 @@ def generate(paths: list[str], out: str = "docs/BENCHMARKS.md") -> str:
                 lines.append(f"- {model} b{batch}: mdlc row missing/errored — "
                              f"{us.get('error', 'n/a')}")
                 continue
-            for other in ("torch-eager", "ort-cuda"):
+            for other in ("torch-eager", "torch-compile", "ort-cuda"):
                 o = systems.get(other, {})
                 if "median_ms" not in o:
                     continue

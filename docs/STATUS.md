@@ -1,5 +1,40 @@
 # Status, GPU-gating, and known gaps
 
+## Phase 2 (2026-07-25) — it runs on a GPU, and here is what it costs
+
+Kaggle **Tesla T4 (sm_75)**, `artifacts/gpu_run_20260725_162618/`. The device
+gate is met: **`pytest -m gpu` 24/24** on the T4 (and again on a P100, sm_60) —
+depthwise, grouped conv, batch-N offsets, reduce/pool/views, the pooled
+allocator, and MobileNetV2 + RepViT end-to-end vs the ORT golden.
+
+Measured autotuning: 55 GEMM shapes + 17 depthwise signatures, 72 cache entries
+per architecture, ≤64 configs each, median-of-50 CUDA-event samples, noisy
+configs discarded. Best GEMM win **70.9%** over the naive default
+(`512x49x4608`); depthwise wins 1.7–26.8%. The pattern is what an honest tuner
+looks like: the big wins are tall-skinny classifier GEMMs, and shapes the
+default already suited win ~0% (`576x196x96`: 0.0%).
+
+Latency, median ms, batch-1 and batch-8, vs PyTorch eager (cuDNN,
+`cudnn.benchmark=True`) on the same card:
+
+| Model | b1 mdlc | b1 torch | b1 result | b8 mdlc | b8 torch | b8 result |
+|---|---|---|---|---|---|---|
+| MobileNetV2 | **2.218** | 5.738 | **2.59× faster** | 13.897 | 7.529 | 1.85× slower |
+| RepViT-m0_9 | **5.049** | 7.226 | **1.43× faster** | 30.744 | 8.134 | 3.78× slower |
+| ResNet-18 | 4.440 | 2.748 | 1.62× slower | 35.749 | 9.438 | 3.79× slower |
+
+This is the result the design predicted, in both directions. **We win batch-1
+on the depthwise-heavy mobile models** — exactly where fusion and launch-count
+reduction pay and where cuDNN's conv kernels have least to work with. **We lose
+ResNet-18**, whose 3×3 dense convs are what cuDNN is most tuned for, and **we
+lose every batch-8 row by ~2–4×** because batched conv still issues *N separate
+im2col+GEMM launch pairs per conv* (GAPS §9.4). That is a known, documented,
+Phase-4 gap — column-batching or implicit GEMM — now with a price tag on it
+rather than a guess.
+
+No ORT-CUDA column: the CUDA EP could not load (CUDA-13 wheel vs CUDA-12
+image). Optional Run 2 in `artifacts/GPU_TODO.md`; nothing depends on it.
+
 ## Phase 2 pre-flight (2026-07-25) — device path made executable
 
 First `pytest -m gpu` attempt on a Kaggle P100 proved the device path had never
