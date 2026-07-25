@@ -37,7 +37,7 @@ def _fmt_launch(row: dict) -> str:
 def generate(paths: list[str], out: str = "docs/BENCHMARKS.md") -> str:
     arts = []
     for p in paths:
-        with open(p) as f:
+        with open(p, encoding="utf-8") as f:
             arts.append((p, json.load(f)))
 
     lines = ["# Benchmarks", ""]
@@ -104,6 +104,12 @@ def generate(paths: list[str], out: str = "docs/BENCHMARKS.md") -> str:
                 lines.append(f"  - on-device parity vs ORT golden: max_abs "
                              f"{us['parity_max_abs_vs_ort']:.2e}; host fallbacks: "
                              f"{us.get('fallbacks') or 'none'}")
+            elif us.get("parity_error"):
+                # Say so loudly: a timing whose correctness was never checked
+                # must not read as a verified result.
+                lines.append(f"  - ⚠ **latency NOT parity-checked** — the ORT "
+                             f"golden was unavailable ({us['parity_error']}); "
+                             f"host fallbacks: {us.get('fallbacks') or 'none'}")
         lines.append("")
 
     lines.append("## Gap analysis")
@@ -125,7 +131,9 @@ def generate(paths: list[str], out: str = "docs/BENCHMARKS.md") -> str:
     lines.append("")
 
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    with open(out, "w") as f:
+    # Explicit UTF-8: the default encoding is cp1252 on Windows, which cannot
+    # represent characters this report legitimately uses.
+    with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     print(f"wrote {out} from {len(arts)} artifact(s)")
     return out

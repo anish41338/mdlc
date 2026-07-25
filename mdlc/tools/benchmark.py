@@ -130,10 +130,6 @@ def bench_mdlc(model_path: str, batch: int, *, tune_cache: str, ctx) -> dict:
     ex = GpuExecutor(compiled.module, ctx=ctx, mem_plan=compiled.mem_plan)
     feeds = {k: _seeded_input(v.shape) for k, v in compiled.feeds.items()}
     res = ex.bench(feeds, iters=ITERS, warmup=WARMUP)
-    # on-device parity vs the ORT golden for these exact feeds
-    golden = _ort_golden(compiled.proto_bytes, feeds)
-    max_abs = max(float(np.max(np.abs(res["outputs"][o] - golden[i])))
-                  for i, o in enumerate(compiled.graph.outputs))
     out = _pcts(res["samples_ms"])
     out.update({
         "system": "mdlc",
@@ -142,8 +138,20 @@ def bench_mdlc(model_path: str, batch: int, *, tune_cache: str, ctx) -> dict:
         "device_bytes": res["device_bytes"],
         "pool_bytes": compiled.mem_plan.pool_bytes,
         "fallbacks": fallbacks,
-        "parity_max_abs_vs_ort": max_abs,
     })
+    # On-device parity vs the ORT golden for these exact feeds. The timing above
+    # is already measured and valid; an unavailable oracle (no onnxruntime, or a
+    # wheel built against a CUDA runtime this image lacks) must therefore be
+    # recorded as a missing *check*, not allowed to discard the measurement.
+    # The result stays clearly labelled either way — an unverified latency is
+    # never reported as a verified one.
+    try:
+        golden = _ort_golden(compiled.proto_bytes, feeds)
+        out["parity_max_abs_vs_ort"] = max(
+            float(np.max(np.abs(res["outputs"][o] - golden[i])))
+            for i, o in enumerate(compiled.graph.outputs))
+    except Exception as e:
+        out["parity_error"] = f"{type(e).__name__}: {e}"
     return out
 
 

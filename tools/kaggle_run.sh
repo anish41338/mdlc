@@ -13,7 +13,21 @@ mkdir -p "$OUT"
 # ---- 0. environment ---------------------------------------------------------
 nvidia-smi | tee "$OUT/nvidia_smi.txt"
 python -m pip install -q -e ".[ref,dev]"
-python -m pip install -q onnxruntime-gpu timm onnxscript  # torch/torchvision preinstalled on Kaggle
+python -m pip install -q timm onnxscript   # torch/torchvision preinstalled on Kaggle
+python -m pip install -q onnxruntime-gpu || true
+
+# onnxruntime-gpu wheels are built against a specific CUDA runtime: the current
+# one wants libcudart.so.13, which this image does not ship, so `import
+# onnxruntime` dies with an ImportError. That oracle is what every parity check
+# and per-pass verifier uses, so fall back to the CPU build rather than run
+# unverified. Costs the ORT-CUDA baseline column (recorded as an error row),
+# never the correctness of our own numbers.
+if ! python -c "import onnxruntime" 2>/dev/null; then
+    echo "WARNING: onnxruntime-gpu unusable here; falling back to CPU onnxruntime"
+    python -m pip uninstall -q -y onnxruntime-gpu || true
+    python -m pip install -q --force-reinstall onnxruntime
+    python -c "import onnxruntime as o; print('onnxruntime', o.__version__, o.get_available_providers())"
+fi
 python - <<'EOF'
 from mdlc.codegen.cuda.nvrtc_runtime import cuda_available, CudaContext
 assert cuda_available(), "CUDA driver/NVRTC not found - is the GPU accelerator on?"
