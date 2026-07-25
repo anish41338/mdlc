@@ -25,3 +25,4 @@ include = ["mdlc*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["gpu: requires a CUDA device (cuda_available()); run with -m gpu on Kaggle/GPU hosts"]
