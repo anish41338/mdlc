@@ -408,6 +408,301 @@ extern "C" __global__ void {name}(
     return name, src
 
 
+# ----- INT8 / DP4A kernels ---------------------------------------------------
+#
+# Conventions shared by all int8 templates:
+#   * activation codes are int8 (uint8 exports are shifted to int8 losslessly
+#     at the QDQ level — __dp4a has no mixed-sign variant);
+#   * zero-points are handled algebraically, never by widening:
+#       Σ_k w[m,k]·(x[k,n] − zp_x)  =  dp4a(w, x) − zp_x·rowsum(w)[m]
+#     with rowsum precomputed from the constant weights at emit time;
+#   * requant epilogue: q = clamp(__float2int_rn(acc · m[c]) + zp_y, lo, hi) —
+#     __float2int_rn is round-half-to-EVEN, exactly ONNX QuantizeLinear's
+#     rounding (get this wrong and parity vs ORT fails on .5 ties);
+#   * folded activations arrive as tightened [lo, hi] clamp bounds in the
+#     quantized domain (ReLU = floor at zp_y).
+
+
+def qgemm_dp4a_kernel(
+    name: str,
+    sched: GemmSchedule,
+    *,
+    with_bias: bool,
+    zp_x: int,
+    zp_y: int,
+    qlo: int,
+    qhi: int,
+) -> tuple[str, str]:
+    """INT8 tiled GEMM with int32 DP4A accumulation.
+
+    C[M,N] (int8 codes) = requant( A[M,K]·(B[K,N] − zp_x) + bias )
+    A = weights (row m = output channel, per-channel multiplier mult[m]),
+    B = activation codes (im2col columns / feature vectors). K must be padded
+    to a multiple of 4 (A pad rows are zero, so B pad content is irrelevant).
+
+    Staging mirrors the fp32 GEMM: A slab transposed in smem, but packed as
+    int (char4 along K) so the inner product is one __dp4a per 4 K-steps.
+    """
+    BM, BN, BK, TM, TN = sched.BM, sched.BN, sched.BK, sched.TM, sched.TN
+    assert BK % 4 == 0, "BK must be a multiple of 4 for char4/dp4a packing"
+    BK4 = BK // 4
+    bias_param = "const int* __restrict__ bias,\n        " if with_bias else ""
+    bias_line = "                if (row < M) v += bias[row];" if with_bias else ""
+
+    src = f"""
+extern "C" __global__ void {name}(
+        const signed char* __restrict__ A,   // [M, K] int8 weights, K%4==0
+        const signed char* __restrict__ B,   // [K, N] int8 activation codes
+        const int* __restrict__ rowsum,      // [M] sum_k A[m,k]
+        {bias_param}const float* __restrict__ mult,     // [M] s_x*s_w[m]/s_y
+        signed char* __restrict__ C,         // [M, N] int8 output codes
+        int M, int N, int K) {{
+    const int BM = {BM}, BN = {BN}, BK = {BK}, BK4 = {BK4};
+    const int TM = {TM}, TN = {TN};
+    const int ZPX = {zp_x}, ZPY = {zp_y};
+
+    // packed char4 slabs: As[k4][m] and Bs[k4][n] hold 4 consecutive K bytes
+    __shared__ int As[BK4][BM];
+    __shared__ int Bs[BK4][BN];
+
+    const int nThreadCol = BN / TN;
+    const int tid = threadIdx.x;
+    const int threadRow = tid / nThreadCol;
+    const int threadCol = tid % nThreadCol;
+    const int numThreads = (BM / TM) * (BN / TN);
+
+    const int blockRow = blockIdx.y * BM;
+    const int blockCol = blockIdx.x * BN;
+
+    int acc[TM][TN];
+    #pragma unroll
+    for (int i = 0; i < TM; ++i)
+        #pragma unroll
+        for (int j = 0; j < TN; ++j) acc[i][j] = 0;
+
+    for (int k0 = 0; k0 < K; k0 += BK) {{
+        for (int idx = tid; idx < BM * BK4; idx += numThreads) {{
+            int r = idx / BK4, c = idx % BK4;
+            int gr = blockRow + r, gk = k0 + c * 4;
+            unsigned packed = 0u;
+            if (gr < M) {{
+                #pragma unroll
+                for (int b = 0; b < 4; ++b) {{
+                    int kk = gk + b;
+                    int v = (kk < K) ? (int)A[gr * K + kk] : 0;
+                    packed |= (unsigned)(v & 0xff) << (8 * b);
+                }}
+            }}
+            As[c][r] = (int)packed;
+        }}
+        for (int idx = tid; idx < BK4 * BN; idx += numThreads) {{
+            int r = idx / BN, c = idx % BN;
+            int gk = k0 + r * 4, gc = blockCol + c;
+            unsigned packed = 0u;
+            if (gc < N) {{
+                #pragma unroll
+                for (int b = 0; b < 4; ++b) {{
+                    int kk = gk + b;
+                    int v = (kk < K) ? (int)B[kk * N + gc] : 0;
+                    packed |= (unsigned)(v & 0xff) << (8 * b);
+                }}
+            }}
+            Bs[r][c] = (int)packed;
+        }}
+        __syncthreads();
+
+        #pragma unroll
+        for (int kk = 0; kk < BK4; ++kk) {{
+            int aFrag[TM], bFrag[TN];
+            #pragma unroll
+            for (int i = 0; i < TM; ++i) aFrag[i] = As[kk][threadRow * TM + i];
+            #pragma unroll
+            for (int j = 0; j < TN; ++j) bFrag[j] = Bs[kk][threadCol * TN + j];
+            #pragma unroll
+            for (int i = 0; i < TM; ++i)
+                #pragma unroll
+                for (int j = 0; j < TN; ++j)
+                    acc[i][j] = __dp4a(aFrag[i], bFrag[j], acc[i][j]);
+        }}
+        __syncthreads();
+    }}
+
+    #pragma unroll
+    for (int i = 0; i < TM; ++i) {{
+        #pragma unroll
+        for (int j = 0; j < TN; ++j) {{
+            int row = blockRow + threadRow * TM + i;
+            int col = blockCol + threadCol * TN + j;
+            if (row < M && col < N) {{
+                int v = acc[i][j] - ZPX * rowsum[row];
+{bias_line}
+                int q = __float2int_rn((float)v * mult[row]) + ZPY;
+                q = max({qlo}, min({qhi}, q));
+                C[row * N + col] = (signed char)q;
+            }}
+        }}
+    }}
+}}
+""".strip()
+    return name, src
+
+
+def qim2col_kernel(name: str, *, zp_x: int) -> tuple[str, str]:
+    """int8 patch gather. Spatial padding fills with the input zero-point
+    (real zero in code space); the rowsum identity then cancels it exactly."""
+    src = f"""
+extern "C" __global__ void {name}(
+        const signed char* __restrict__ x,   // [C, H, W] (single image)
+        signed char* __restrict__ cols,      // [K_pad, OH*OW]
+        int C, int H, int W,
+        int KH, int KW, int OH, int OW,
+        int SH, int SW, int PH, int PW, int DH, int DW) {{
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int n_cols = OH * OW;
+    int n_rows = C * KH * KW;
+    if (col >= n_cols || row >= n_rows) return;
+
+    int kw = row % KW;
+    int kh = (row / KW) % KH;
+    int c  = row / (KH * KW);
+    int ow = col % OW;
+    int oh = col / OW;
+
+    int ih = oh * SH - PH + kh * DH;
+    int iw = ow * SW - PW + kw * DW;
+    signed char v = (signed char){zp_x};
+    if (ih >= 0 && ih < H && iw >= 0 && iw < W)
+        v = x[(c * H + ih) * W + iw];
+    cols[row * n_cols + col] = v;
+}}
+""".strip()
+    return name, src
+
+
+def qdepthwise_kernel(
+    name: str,
+    *,
+    C: int, mult_ch: int, H: int, W: int, OH: int, OW: int,
+    KH: int, KW: int, SH: int, SW: int, PH: int, PW: int,
+    DH: int = 1, DW: int = 1,
+    tile_h: int = 8, tile_w: int = 8,
+    with_bias: bool = False,
+    zp_x: int = 0, zp_y: int = 0, qlo: int = -128, qhi: int = 127,
+) -> tuple[str, str]:
+    """Direct int8 depthwise conv: same mapping as the fp32 kernel
+    (blockIdx.z = n·C_out + c_out, one thread per output pixel), int32
+    accumulate over zp-centered taps, per-channel requant epilogue. Depthwise
+    is memory-bound with K·K ≤ 9 taps per output — DP4A packing buys nothing
+    here; the win is int8 traffic (4x less than fp32)."""
+    c_out = C * mult_ch
+    nthreads = tile_h * tile_w
+    bias_param = "const int* __restrict__ bias,\n        " if with_bias else ""
+    bias_line = "        acc += bias[co];" if with_bias else ""
+
+    src = f"""
+extern "C" __global__ void {name}(
+        const signed char* __restrict__ x,   // [N, {C}, {H}, {W}]
+        const signed char* __restrict__ w,   // [{c_out}, 1, {KH}, {KW}]
+        {bias_param}const float* __restrict__ mch,     // [{c_out}] s_x*s_w[c]/s_y
+        signed char* __restrict__ y) {{      // [N, {c_out}, {OH}, {OW}]
+    const int C_OUT = {c_out}, MULT = {mult_ch};
+    const int H = {H}, W = {W}, OH = {OH}, OW = {OW};
+    const int KH = {KH}, KW = {KW}, SH = {SH}, SW = {SW};
+    const int PH = {PH}, PW = {PW}, DH = {DH}, DW = {DW};
+    const int TILE_H = {tile_h}, TILE_W = {tile_w};
+    const int ZPX = {zp_x}, ZPY = {zp_y};
+
+    const int nc = blockIdx.z;
+    const int n  = nc / C_OUT;
+    const int co = nc % C_OUT;
+    const int ci = co / MULT;
+
+    const int tid = threadIdx.x;
+    const int tx = tid % TILE_W;
+    const int ty = tid / TILE_W;
+
+    const int oh = blockIdx.y * TILE_H + ty;
+    const int ow = blockIdx.x * TILE_W + tx;
+    const signed char* xin = x + (n * {C} + ci) * H * W;
+
+    if (oh < OH && ow < OW) {{
+        int acc = 0;
+        #pragma unroll
+        for (int kh = 0; kh < KH; ++kh) {{
+            #pragma unroll
+            for (int kw = 0; kw < KW; ++kw) {{
+                int ih = oh * SH - PH + kh * DH;
+                int iw = ow * SW - PW + kw * DW;
+                int xv = (ih >= 0 && ih < H && iw >= 0 && iw < W)
+                             ? (int)xin[ih * W + iw] : ZPX;
+                acc += (xv - ZPX) * (int)w[co * KH * KW + kh * KW + kw];
+            }}
+        }}
+{bias_line}
+        int q = __float2int_rn((float)acc * mch[co]) + ZPY;
+        q = max({qlo}, min({qhi}, q));
+        y[(n * C_OUT + co) * OH * OW + oh * OW + ow] = (signed char)q;
+    }}
+}}
+""".strip()
+    return name, src
+
+
+def qadd_kernel(name: str, *, a_scale: float, a_zp: int, b_scale: float,
+                b_zp: int, y_scale: float, y_zp: int, qlo: int, qhi: int,
+                total: int, block: int = 128) -> tuple[str, str]:
+    """int8 residual Add: dequantize both operands to fp32 in-register, add,
+    requantize — accurate, simple, one kernel (no int-domain rescale games)."""
+    src = f"""
+extern "C" __global__ void {name}(
+        const signed char* __restrict__ a,
+        const signed char* __restrict__ b,
+        signed char* __restrict__ y) {{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= {total}) return;
+    float af = (float)((int)a[i] - {a_zp}) * {float(a_scale)}f;
+    float bf = (float)((int)b[i] - {b_zp}) * {float(b_scale)}f;
+    int q = __float2int_rn((af + bf) * {1.0 / float(y_scale)}f) + {y_zp};
+    q = max({qlo}, min({qhi}, q));
+    y[i] = (signed char)q;
+}}
+""".strip()
+    return name, src
+
+
+def quantize_kernel(name: str, *, scale: float, zp: int, total: int,
+                    block: int = 128) -> tuple[str, str]:
+    """fp32 -> int8 boundary kernel (explicit Q at a mixed-precision edge)."""
+    src = f"""
+extern "C" __global__ void {name}(
+        const float* __restrict__ x,
+        signed char* __restrict__ y) {{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= {total}) return;
+    int q = __float2int_rn(x[i] * {1.0 / float(scale)}f) + {zp};
+    q = max(-128, min(127, q));
+    y[i] = (signed char)q;
+}}
+""".strip()
+    return name, src
+
+
+def dequantize_kernel(name: str, *, scale: float, zp: int, total: int,
+                      block: int = 128) -> tuple[str, str]:
+    """int8 -> fp32 boundary kernel."""
+    src = f"""
+extern "C" __global__ void {name}(
+        const signed char* __restrict__ x,
+        float* __restrict__ y) {{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= {total}) return;
+    y[i] = (float)((int)x[i] - {zp}) * {float(scale)}f;
+}}
+""".strip()
+    return name, src
+
+
 # ----- fused elementwise --------------------------------------------------
 
 _BINARY = {"Add": "+", "Sub": "-", "Mul": "*", "Div": "/"}

@@ -95,8 +95,15 @@ def _ckn(code: int, what: str) -> None:
 # ----- NVRTC compile ------------------------------------------------------
 
 def compile_to_ptx(source: str, name: str = "kern.cu",
-                   arch: Optional[str] = None) -> bytes:
-    """Compile CUDA C source to PTX with NVRTC. ``arch`` like 'sm_75'."""
+                   arch: Optional[str] = None, *,
+                   fast_math: bool = False) -> bytes:
+    """Compile CUDA C source to PTX with NVRTC. ``arch`` like 'sm_75'.
+
+    ``fast_math`` is OFF by default: correctness/parity runs must use IEEE
+    math so the GPU matches the sim and ORT. It exists only as a *labeled*
+    benchmark variant — never enable it for a run whose output is compared
+    against a golden.
+    """
     if _NVRTC is None:
         raise CudaError("NVRTC library not found")
     prog = ctypes.c_void_p()
@@ -106,7 +113,8 @@ def compile_to_ptx(source: str, name: str = "kern.cu",
     opts = []
     if arch:
         opts.append(f"--gpu-architecture=compute_{arch.split('_')[-1]}".encode())
-    opts.append(b"--use_fast_math")
+    if fast_math:
+        opts.append(b"--use_fast_math")
     arr = (ctypes.c_char_p * len(opts))(*opts)
     rc = _NVRTC.nvrtcCompileProgram(prog, len(opts), arr)
     # always fetch the build log for diagnostics
@@ -180,6 +188,11 @@ class CudaContext:
         _DRIVER.cuDeviceGetAttribute(ctypes.byref(minor), 76, self.device)
         return f"sm_{major.value}{minor.value}"
 
+    def device_name(self) -> str:
+        buf = ctypes.create_string_buffer(256)
+        _DRIVER.cuDeviceGetName(buf, 256, self.device)
+        return buf.value.decode(errors="replace")
+
     def malloc(self, nbytes: int) -> ctypes.c_void_p:
         ptr = ctypes.c_void_p()
         _ck(_DRIVER.cuMemAlloc(ctypes.byref(ptr), nbytes), "cuMemAlloc")
@@ -209,6 +222,8 @@ class CudaContext:
 
     # event-based timing of a callable that issues launches
     def time_ms(self, fn, iters: int = 50, warmup: int = 10) -> float:
+        """Mean ms/iteration over one bracketing event pair (cheap, but blind
+        to per-iteration variance — prefer ``time_ms_samples`` + median)."""
         start, stop = ctypes.c_void_p(), ctypes.c_void_p()
         _ck(_DRIVER.cuEventCreate(ctypes.byref(start), 0), "cuEventCreate")
         _ck(_DRIVER.cuEventCreate(ctypes.byref(stop), 0), "cuEventCreate")
@@ -223,3 +238,25 @@ class CudaContext:
         ms = ctypes.c_float()
         _ck(_DRIVER.cuEventElapsedTime(ctypes.byref(ms), start, stop), "cuEventElapsedTime")
         return ms.value / iters
+
+    def time_ms_samples(self, fn, iters: int = 50, warmup: int = 10) -> list[float]:
+        """Per-iteration ms samples, one CUDA-event pair per iteration, so the
+        caller can take a median and reject noisy configs (IQR gate) — the
+        honest way to time on shared GPUs whose clocks can't be locked."""
+        start, stop = ctypes.c_void_p(), ctypes.c_void_p()
+        _ck(_DRIVER.cuEventCreate(ctypes.byref(start), 0), "cuEventCreate")
+        _ck(_DRIVER.cuEventCreate(ctypes.byref(stop), 0), "cuEventCreate")
+        for _ in range(warmup):
+            fn()
+        self.synchronize()
+        out = []
+        ms = ctypes.c_float()
+        for _ in range(iters):
+            _ck(_DRIVER.cuEventRecord(start, None), "cuEventRecord")
+            fn()
+            _ck(_DRIVER.cuEventRecord(stop, None), "cuEventRecord")
+            _ck(_DRIVER.cuEventSynchronize(stop), "cuEventSynchronize")
+            _ck(_DRIVER.cuEventElapsedTime(ctypes.byref(ms), start, stop),
+                "cuEventElapsedTime")
+            out.append(float(ms.value))
+        return out

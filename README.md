@@ -57,17 +57,24 @@ and activate unchanged on a CUDA device.
 ## Quickstart
 
 ```bash
-pip install -e ".[ref,dev]"
+pip install -e ".[ref,dev]"          # add ,torch for the model exporters
 python -m mdlc.tools.build_resnet18                       # -> examples/resnet18.onnx
+python -m mdlc.tools.build_mobilenetv2                    # -> examples/mobilenetv2.onnx
+python -m mdlc.tools.build_repvit                         # -> examples/repvit_m0_9.onnx
 python -m pytest -q                                       # run the test suite
 python -m mdlc.tools.compile examples/resnet18.onnx --report --emit out.cu
 python -m mdlc.tools.benchmark examples/resnet18.onnx     # optimization wins + latency
 ```
 
-On ResNet-18 the pipeline currently collapses **141 graph ops to 32** (17 fused
-groups), emits **12 distinct CUDA kernels**, and the memory planner pools 13 MB
-of activations into **4.6 MB (65% saved)** — all verified bit-for-bit against
-ONNX Runtime.
+**ResNet-18, MobileNetV2, and RepViT-m0_9 all compile end-to-end with zero
+host fallbacks** (`compile --report` prints the fallback list; it reads
+`none`), verified against ONNX Runtime. ResNet-18 collapses **141 graph ops
+to 32** (17 fused groups) into **12 distinct CUDA kernels**, and the memory
+planner pools 13 MB of activations into **4.6 MB (65% saved)** — 93% saved on
+RepViT. Kernels: tiled shared-memory GEMM, im2col conv, **direct depthwise
+conv** (smem tile + halo, fused BN/bias + activation epilogue), fused
+elementwise chains with NumPy-style broadcasting (SE gates, GELU-erf chains),
+deterministic spatial-mean reduction, max-pool.
 
 ## Validating codegen without a GPU
 
@@ -82,11 +89,11 @@ unchanged via NVRTC (`nvrtc_runtime.py`) on a real device.
 
 ## Target models
 
-ResNet-18 and MobileNet today; **RepViT** is the headline tie-in — the same
-model quantized with AIMET at Samsung, now fed through this compiler so the
-story is one arc: *quantize RepViT → compile the same ONNX to fused CUDA*. The
-INT8 quantized-GEMM (DP4A) codegen path is the stretch that fuses both worlds.
+ResNet-18, MobileNetV2, and **RepViT-m0_9** (public timm weights,
+re-parameterized deploy form) — all end-to-end with zero host fallbacks. The
+INT8 arc is next: quantize RepViT with public AIMET, compile the same QDQ
+ONNX to fused DP4A kernels.
 
 See [docs/STATUS.md](docs/STATUS.md) for what's done and what's GPU-gated, and
-[docs/GAPS.md](docs/GAPS.md) for the measured gap inventory (grouped/depthwise
-conv host-fallback, conv codegen breaks at batch>1, per-model fallback lists).
+[docs/GAPS.md](docs/GAPS.md) for the measured gap inventory and per-model
+launch tables.

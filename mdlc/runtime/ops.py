@@ -228,6 +228,105 @@ def div(a, b):
     return a / b
 
 
+# ----- quantization (ONNX QDQ semantics, exact) ----------------------------
+#
+# Rounding is round-half-to-even everywhere (np.rint == ONNX QuantizeLinear ==
+# CUDA __float2int_rn/rintf) — get this wrong and int8 parity vs ORT fails on
+# exact .5 ties.
+
+def _qrange(zp_dtype) -> tuple[int, int]:
+    return (0, 255) if np.dtype(zp_dtype) == np.uint8 else (-128, 127)
+
+
+def _per_axis(arr, x_ndim, axis):
+    """Reshape a 1-D per-axis scale/zp for broadcasting along ``axis``."""
+    a = np.asarray(arr)
+    if a.ndim == 1 and a.size > 1:
+        shape = [1] * x_ndim
+        shape[axis] = a.size
+        return a.reshape(shape)
+    return a
+
+
+def quantize_linear(x, scale, zp, axis=1):
+    """fp32 -> int8/uint8 codes: clamp(rint(x/scale) + zp)."""
+    zp = np.asarray(zp)
+    s = _per_axis(np.asarray(scale, np.float32), x.ndim, axis)
+    z = _per_axis(zp, x.ndim, axis)
+    qmin, qmax = _qrange(zp.dtype)
+    q = np.rint(np.asarray(x, np.float32) / s).astype(np.int64) + z.astype(np.int64)
+    return np.clip(q, qmin, qmax).astype(zp.dtype)
+
+
+def dequantize_linear(q, scale, zp, axis=1):
+    """int codes -> fp32: (q - zp) * scale."""
+    s = _per_axis(np.asarray(scale, np.float32), np.asarray(q).ndim, axis)
+    z = _per_axis(np.asarray(zp), np.asarray(q).ndim, axis)
+    return (np.asarray(q).astype(np.int32) - z.astype(np.int32)).astype(np.float32) * s
+
+
+def _requant(acc_i32, multiplier, y_zp, zp_dtype, act_qmin=None, act_qmax=None):
+    """int32 accumulator -> output codes with a per-channel fp32 multiplier.
+
+    q = clamp(rint(acc * m) + zp_y). Activations folded into the quantized
+    domain arrive as clamp bounds (ReLU = floor at zp_y): the kernel does the
+    same, so this reference is bit-exact against the emitted epilogue."""
+    qmin, qmax = _qrange(zp_dtype)
+    if act_qmin is not None:
+        qmin = max(qmin, int(act_qmin))
+    if act_qmax is not None:
+        qmax = min(qmax, int(act_qmax))
+    v = acc_i32.astype(np.float32) * multiplier.astype(np.float32)
+    q = np.rint(v).astype(np.int64) + int(y_zp)
+    return np.clip(q, qmin, qmax).astype(zp_dtype)
+
+
+def qconv(xq, wq, bias_i32, *, x_scale, x_zp, w_scales, y_scale, y_zp,
+          strides, pads, dilations, group, act_qmin=None, act_qmax=None,
+          out_dtype=np.int8):
+    """Quantized conv: int32-exact accumulation over centered int inputs, then
+    per-channel requantization. Weight zero-points are 0 (per-channel
+    symmetric — the AIMET W8A8 convention this path targets)."""
+    xi = xq.astype(np.int64) - int(x_zp)
+    wi = wq.astype(np.int64)
+    acc = conv(xi, wi, None, strides=strides, pads=pads,
+               dilations=dilations, group=group)
+    if bias_i32 is not None:
+        acc = acc + np.asarray(bias_i32, np.int64).reshape(1, -1, 1, 1)
+    m = (np.float32(x_scale) * np.asarray(w_scales, np.float32)
+         / np.float32(y_scale)).reshape(1, -1, 1, 1)
+    return _requant(acc.astype(np.int32), m, y_zp, out_dtype, act_qmin, act_qmax)
+
+
+def qgemm(xq, wq, bias_i32, *, x_scale, x_zp, w_scales, y_scale, y_zp,
+          act_qmin=None, act_qmax=None, out_dtype=np.int8):
+    """Quantized Gemm/Linear: y[M,N] over int8 x[M,K] and per-column-quantized
+    w[K,N] (weights already transposed to K,N form by the pass)."""
+    xi = xq.astype(np.int64) - int(x_zp)
+    acc = xi @ wq.astype(np.int64)
+    if bias_i32 is not None:
+        acc = acc + np.asarray(bias_i32, np.int64).reshape(1, -1)
+    m = (np.float32(x_scale) * np.asarray(w_scales, np.float32)
+         / np.float32(y_scale)).reshape(1, -1)
+    return _requant(acc.astype(np.int32), m, y_zp, out_dtype, act_qmin, act_qmax)
+
+
+def qadd(aq, bq, *, a_scale, a_zp, b_scale, b_zp, y_scale, y_zp,
+         act_qmin=None, act_qmax=None, out_dtype=np.int8):
+    """Quantized residual Add: dequantize both sides to fp32 in-register,
+    add, requantize — accurate and simple (one fused kernel on device)."""
+    af = (aq.astype(np.int32) - int(a_zp)).astype(np.float32) * np.float32(a_scale)
+    bf = (bq.astype(np.int32) - int(b_zp)).astype(np.float32) * np.float32(b_scale)
+    v = (af + bf) / np.float32(y_scale)
+    qmin, qmax = _qrange(out_dtype)
+    if act_qmin is not None:
+        qmin = max(qmin, int(act_qmin))
+    if act_qmax is not None:
+        qmax = min(qmax, int(act_qmax))
+    q = np.rint(v).astype(np.int64) + int(y_zp)
+    return np.clip(q, qmin, qmax).astype(out_dtype)
+
+
 # ----- tensor reshaping ---------------------------------------------------
 
 def flatten(x, axis=1):

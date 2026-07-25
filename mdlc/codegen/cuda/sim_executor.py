@@ -65,7 +65,9 @@ def simulate_module(module: CudaModule, feeds: dict[str, np.ndarray],
         elif launch.kind == "gemm":
             src = module.kernels[launch.kernel_name]
             m = launch.meta
-            sched = schedule_fn(None, (m["M"], m["N"], m["K"]))
+            # the schedule the kernel was emitted with (tuned or default);
+            # falling back to schedule_fn keeps hand-built test modules working
+            sched = m.get("sched") or schedule_fn(None, (m["M"], m["N"], m["K"]))
             if "out_4d" in m:                       # conv-as-GEMM, one image
                 w = env[launch.inputs[0]].reshape(m["weight_2d"]).astype(np.float32)
                 bias = env[launch.inputs[2]].astype(np.float32) if m["with_bias"] else None

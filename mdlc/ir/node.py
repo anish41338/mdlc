@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+# Metadata-only reshapes: the output aliases the input's bytes. Both codegen
+# (zero-launch views) and the memory planner (alias-aware liveness) must agree
+# on this set, so it lives at the IR level.
+VIEW_OPS = frozenset({"Flatten", "Reshape", "Squeeze", "Unsqueeze", "Identity"})
+
 
 @dataclass
 class Node:

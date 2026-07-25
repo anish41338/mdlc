@@ -29,6 +29,7 @@ def export(
     batch: int = 1,
     opset: int = 17,
     seed: int = 0,
+    res: int = 224,
 ) -> str:
     import timm
     import torch
@@ -41,7 +42,7 @@ def export(
     model.eval()
     model = reparameterize_model(model)
 
-    dummy = torch.randn(batch, 3, 224, 224)
+    dummy = torch.randn(batch, 3, res, res)
     # Keep O(1) activations at every depth so parity checks have power (see
     # export_utils.lsuv_calibrate).
     lsuv_calibrate(model, dummy)
@@ -53,7 +54,8 @@ def export(
         do_constant_folding=False,   # leave folding to *our* pass
         dynamic_axes=None,           # fixed batch: kernels specialize on shape
     )
-    print(f"wrote {path} ({variant}, batch={batch}, opset={opset}, seed={seed})")
+    print(f"wrote {path} ({variant}, batch={batch}, res={res}, opset={opset}, "
+          f"seed={seed})")
     return path
 
 
@@ -64,6 +66,9 @@ if __name__ == "__main__":
     ap.add_argument("--batch", type=int, default=1)
     ap.add_argument("--opset", type=int, default=17)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--res", type=int, default=224,
+                    help="input H=W (reduced sizes for sim-path tests)")
     args = ap.parse_args()
     out = args.out or f"examples/{args.variant}.onnx"
-    export(out, variant=args.variant, batch=args.batch, opset=args.opset, seed=args.seed)
+    export(out, variant=args.variant, batch=args.batch, opset=args.opset,
+           seed=args.seed, res=args.res)

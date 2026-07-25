@@ -104,6 +104,42 @@ class ReferenceExecutor:
         if op == "FusedElementwise":
             return self._exec_fused_elementwise(node, env)
 
+        # ---- quantized ops (Phase 3: QDQ -> DP4A path) -------------------
+        if op == "QuantizeLinear":
+            zp = ins[2] if len(ins) > 2 and ins[2] is not None else np.int8(0)
+            return [ops.quantize_linear(ins[0], ins[1], np.asarray(zp),
+                                        a.get("axis", 1))]
+        if op == "DequantizeLinear":
+            zp = ins[2] if len(ins) > 2 and ins[2] is not None else np.int8(0)
+            return [ops.dequantize_linear(ins[0], ins[1], np.asarray(zp),
+                                          a.get("axis", 1))]
+        if op == "QConvFused":
+            x, w, b = ins[0], ins[1], (ins[2] if len(ins) > 2 else None)
+            return [ops.qconv(
+                x, w, b,
+                x_scale=a["x_scale"], x_zp=a["x_zp"], w_scales=a["w_scales"],
+                y_scale=a["y_scale"], y_zp=a["y_zp"],
+                strides=a.get("strides", [1, 1]), pads=a.get("pads"),
+                dilations=a.get("dilations", [1, 1]), group=a.get("group", 1),
+                act_qmin=a.get("act_qmin"), act_qmax=a.get("act_qmax"),
+                out_dtype=np.dtype(a.get("out_dtype", "int8")))]
+        if op == "QGemmFused":
+            x, w, b = ins[0], ins[1], (ins[2] if len(ins) > 2 else None)
+            return [ops.qgemm(
+                x, w, b,
+                x_scale=a["x_scale"], x_zp=a["x_zp"], w_scales=a["w_scales"],
+                y_scale=a["y_scale"], y_zp=a["y_zp"],
+                act_qmin=a.get("act_qmin"), act_qmax=a.get("act_qmax"),
+                out_dtype=np.dtype(a.get("out_dtype", "int8")))]
+        if op == "QAddFused":
+            return [ops.qadd(
+                ins[0], ins[1],
+                a_scale=a["a_scale"], a_zp=a["a_zp"],
+                b_scale=a["b_scale"], b_zp=a["b_zp"],
+                y_scale=a["y_scale"], y_zp=a["y_zp"],
+                act_qmin=a.get("act_qmin"), act_qmax=a.get("act_qmax"),
+                out_dtype=np.dtype(a.get("out_dtype", "int8")))]
+
         # ---- core ops --------------------------------------------------
         if op == "Conv":
             return [ops.conv(ins[0], ins[1], ins[2] if len(ins) > 2 else None,

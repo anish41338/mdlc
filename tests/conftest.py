@@ -24,8 +24,20 @@ def has_ort() -> bool:
         return False
 
 
+def has_torch_models() -> bool:
+    try:
+        import timm  # noqa: F401
+        import torch  # noqa: F401
+        import torchvision  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 requires_gpp = pytest.mark.skipif(not has_gpp(), reason="needs g++ to compile CUDA-sim")
 requires_ort = pytest.mark.skipif(not has_ort(), reason="needs onnxruntime")
+requires_torch_models = pytest.mark.skipif(
+    not has_torch_models(), reason="needs torch+torchvision+timm to export models")
 
 
 @pytest.fixture

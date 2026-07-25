@@ -53,6 +53,19 @@ __thread dim3 threadIdx;
 #define CUDART_INF_F (__builtin_huge_valf())
 #endif
 
+// ---- int8 / DP4A emulation ------------------------------------------------
+// __dp4a: 4-way int8 dot product with int32 accumulate (sm_61+ intrinsic).
+// Little-endian lane order matches the GPU: byte 0 = bits 0..7.
+static inline int __dp4a(int a, int b, int c) {
+    const signed char* pa = (const signed char*)&a;
+    const signed char* pb = (const signed char*)&b;
+    for (int i = 0; i < 4; ++i) c += (int)pa[i] * (int)pb[i];
+    return c;
+}
+// Round-to-nearest-EVEN float->int: exactly CUDA's __float2int_rn and ONNX
+// QuantizeLinear rounding (rintf honors the default FE_TONEAREST mode).
+#define __float2int_rn(x) ((int)rintf((float)(x)))
+
 // Reusable sense-reversing barrier over a block's threads.
 struct Barrier {
     CRITICAL_SECTION cs; CONDITION_VARIABLE cv;
@@ -105,6 +118,22 @@ static std::vector<float> load_floats(const char* path, long n) {
 static void save_floats(const char* path, const float* p, long n) {
     FILE* f = fopen(path, "wb");
     fwrite(p, sizeof(float), (size_t)n, f);
+    fclose(f);
+}
+// dtype-generic raw IO for int8/int32 kernel buffers
+template <typename T>
+static std::vector<T> load_raw(const char* path, long n) {
+    std::vector<T> v(n);
+    FILE* f = fopen(path, "rb");
+    if (!f) { fprintf(stderr, "cannot open %s\n", path); exit(2); }
+    fread(v.data(), sizeof(T), (size_t)n, f);
+    fclose(f);
+    return v;
+}
+template <typename T>
+static void save_raw(const char* path, const T* p, long n) {
+    FILE* f = fopen(path, "wb");
+    fwrite(p, sizeof(T), (size_t)n, f);
     fclose(f);
 }
 """
@@ -182,7 +211,16 @@ def simulate_gemm(source, kernel_name, sched, A, B, bias):
         _dump(wd, "B", B)
         if with_bias:
             _dump(wd, "bias", bias)
-        bias_load = ('auto bias = load_floats((dir+"/bias.bin").c_str(), N);'
+        # Bias length depends on the broadcast axis the kernel indexes: the
+        # conv-as-GEMM case adds bias[row] (length M = out-channels), the
+        # Linear/Gemm case adds bias[col] (length N). Loading a hardcoded N
+        # would under-read the buffer whenever M > N (deep layers where
+        # channels exceed spatial size), so the kernel reads past the vector
+        # — garbage on CPU, a page-fault crash for large M. Load the array's
+        # true length; on a real device the full bias buffer is allocated, so
+        # this only ever bit the sim.
+        bias_len = int(np.asarray(bias).size) if with_bias else 0
+        bias_load = (f'auto bias = load_floats((dir+"/bias.bin").c_str(), {bias_len});'
                      if with_bias else "")
         call = (f"{kernel_name}(gA, gB, " + ("gBias, " if with_bias else "")
                 + "gC, gM, gN, gK)")
@@ -344,6 +382,80 @@ int main(int argc, char** argv) {{
 """
         _compile_and_run(main, wd)
         outs = [np.fromfile(os.path.join(wd, f"out{j}.bin"), dtype=np.float32)
+                for j in range(n_out)]
+    return outs
+
+
+_CTYPE = {"float32": "float", "int8": "signed char",
+          "uint8": "unsigned char", "int32": "int"}
+
+
+def simulate_kernel_typed(source, kernel_name, *, inputs, output_specs,
+                          grid=(1, 1, 1), block=64):
+    """Like ``simulate_kernel`` but dtype-aware (the int8/DP4A path).
+
+    ``inputs``: np arrays whose dtypes are preserved bit-for-bit into the
+    kernel (int8 codes stay int8 codes). ``output_specs``: list of
+    ``(numel, np_dtype)``. Calling convention unchanged: input pointers, then
+    output pointers, in order.
+    """
+    gx, gy, gz = grid
+    inputs = [np.ascontiguousarray(a) for a in inputs]
+    n_in = len(inputs)
+    n_out = len(output_specs)
+    in_ct = [_CTYPE[str(a.dtype)] for a in inputs]
+    out_ct = [_CTYPE[str(np.dtype(dt))] for _, dt in output_specs]
+
+    with tempfile.TemporaryDirectory() as wd:
+        for i, arr in enumerate(inputs):
+            arr.ravel().tofile(os.path.join(wd, f"in{i}.bin"))
+        loads = "\n    ".join(
+            f'auto in{i} = load_raw<{in_ct[i]}>((dir+"/in{i}.bin").c_str(), '
+            f'{int(inputs[i].size)}L);'
+            for i in range(n_in))
+        out_decls = "\n    ".join(
+            f"std::vector<{out_ct[j]}> out{j}({int(output_specs[j][0])}L, 0);"
+            for j in range(n_out))
+        glob = "\n".join(
+            [f"static const {in_ct[i]}* g_in{i};" for i in range(n_in)] +
+            [f"static {out_ct[j]}* g_out{j};" for j in range(n_out)])
+        set_g = "\n    ".join(
+            [f"g_in{i} = in{i}.data();" for i in range(n_in)] +
+            [f"g_out{j} = out{j}.data();" for j in range(n_out)])
+        args = ", ".join([f"g_in{i}" for i in range(n_in)] +
+                         [f"g_out{j}" for j in range(n_out)])
+        saves = "\n    ".join(
+            f'save_raw<{out_ct[j]}>((dir+"/out{j}.bin").c_str(), out{j}.data(), '
+            f'{int(output_specs[j][0])}L);'
+            for j in range(n_out))
+        main = f"""
+{_SHIM}
+{_prep_kernel(source)}
+
+{glob}
+static void body() {{ {kernel_name}({args}); }}
+
+int main(int argc, char** argv) {{
+    std::string dir = argv[1];
+    {loads}
+    {out_decls}
+    {set_g}
+    blockDim.x = {int(block)}; blockDim.y = 1; blockDim.z = 1;
+    gridDim.x = {gx}; gridDim.y = {gy}; gridDim.z = {gz};
+    g_body = body;
+    for (unsigned bz = 0; bz < {gz}; ++bz)
+      for (unsigned by = 0; by < {gy}; ++by)
+        for (unsigned bx = 0; bx < {gx}; ++bx) {{
+            blockIdx.x = bx; blockIdx.y = by; blockIdx.z = bz;
+            launch_block({int(block)});
+        }}
+    {saves}
+    return 0;
+}}
+"""
+        _compile_and_run(main, wd)
+        outs = [np.fromfile(os.path.join(wd, f"out{j}.bin"),
+                            dtype=np.dtype(output_specs[j][1]))
                 for j in range(n_out)]
     return outs
 

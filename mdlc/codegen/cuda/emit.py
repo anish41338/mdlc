@@ -26,7 +26,7 @@ from mdlc.codegen.schedule import (
     GemmSchedule,
 )
 from mdlc.codegen.cuda import templates as T
-from mdlc.ir import Graph, Node
+from mdlc.ir import VIEW_OPS, Graph, Node
 from mdlc.runtime import ops
 
 ScheduleFn = Callable[[Node, tuple], GemmSchedule]
@@ -45,8 +45,8 @@ ELEMENTWISE_OPS = {
     "LeakyRelu", "HardSigmoid", "Erf",
 }
 
-# Metadata-only reshapes: the output aliases the input buffer.
-VIEW_OPS = {"Flatten", "Reshape", "Squeeze", "Unsqueeze", "Identity"}
+# Metadata-only reshapes (canonical set lives in mdlc.ir — the memory
+# planner's alias-aware liveness must agree with codegen's zero-launch views).
 
 
 @dataclass
@@ -258,7 +258,7 @@ class CudaCodegen:
             self.plan.append(Launch(
                 "gemm", kname, inputs, [node.outputs[0]], grid, block,
                 meta={"M": OC, "N": P, "K": K, "with_bias": bool(has_bias),
-                      "weight_2d": (OC, K), "out_4d": ys,
+                      "weight_2d": (OC, K), "out_4d": ys, "sched": sched,
                       "batch_index": bi, "out_offset": bi * OC * OH * OW,
                       "node": node}))
 
@@ -270,7 +270,10 @@ class CudaCodegen:
         mult = OC // C
         has_bias = len(node.inputs) > 2 and node.inputs[2]
         activation = node.attrs.get("activation")
-        sched = self.dw_schedule_fn(node, (C, H, W, KH, SH))
+        dw_sig = {"C": C, "mult": mult, "H": H, "W": W, "OH": OH, "OW": OW,
+                  "KH": KH, "KW": KW, "SH": SH, "SW": SW, "PH": PH, "PW": PW,
+                  "DH": DH, "DW": DW}
+        sched = self.dw_schedule_fn(node, dw_sig)
 
         sig = ("dw", C, mult, H, W, OH, OW, KH, KW, SH, SW, PH, PW, DH, DW,
                sched.key(), bool(has_bias), activation,
@@ -297,7 +300,8 @@ class CudaCodegen:
         self.plan.append(Launch(
             "depthwise", kname, inputs, [node.outputs[0]],
             grid, (sched.threads_per_block(), 1, 1),
-            meta={"out_4d": ys, "node": node}))
+            meta={"out_4d": ys, "node": node, "dw_sig": dw_sig,
+                  "sched": sched}))
 
     def _lower_grouped(self, g: Graph, node: Node, *, xs, ws, ys, group,
                        SH, SW, PH, PW, DH, DW) -> None:
@@ -339,7 +343,7 @@ class CudaCodegen:
                     "gemm", kname, inputs, [node.outputs[0]], grid, block,
                     meta={"M": OCg, "N": P, "K": Kg, "with_bias": bool(has_bias),
                           "weight_2d": (OC, Kg), "w_rows": (gi * OCg, (gi + 1) * OCg),
-                          "out_4d": ys, "batch_index": bi,
+                          "out_4d": ys, "batch_index": bi, "sched": sched,
                           "oc_range": (gi * OCg, (gi + 1) * OCg),
                           "out_offset": (bi * OC + gi * OCg) * OH * OW,
                           "node": node}))
@@ -422,7 +426,7 @@ class CudaCodegen:
         self.plan.append(Launch("gemm", kname, inputs, [node.outputs[0]], grid, block,
                                 meta={"M": M, "N": N, "K": K, "transA": transA,
                                       "transB": transB, "alpha": a.get("alpha", 1.0),
-                                      "beta": a.get("beta", 1.0),
+                                      "beta": a.get("beta", 1.0), "sched": sched,
                                       "with_bias": bool(has_bias), "node": node}))
 
     def _lower_matmul(self, g: Graph, node: Node) -> None:
@@ -435,7 +439,7 @@ class CudaCodegen:
         grid, block = self._grid_block_gemm(M, N, sched)
         self.plan.append(Launch("gemm", kname, [A, B], [node.outputs[0]], grid, block,
                                 meta={"M": M, "N": N, "K": K, "with_bias": False,
-                                      "node": node}))
+                                      "sched": sched, "node": node}))
 
     def _lower_elementwise(self, g: Graph, node: Node) -> None:
         # Every external input must be a compile-time scalar or a static shape

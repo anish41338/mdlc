@@ -27,6 +27,7 @@ class DType:
     INT64 = "int64"
     INT32 = "int32"
     INT8 = "int8"
+    UINT8 = "uint8"
     BOOL = "bool"
 
     _TO_NUMPY = {
@@ -35,6 +36,7 @@ class DType:
         INT64: np.int64,
         INT32: np.int32,
         INT8: np.int8,
+        UINT8: np.uint8,
         BOOL: np.bool_,
     }
 

@@ -12,7 +12,7 @@ import os
 
 
 def export(path: str = "examples/mobilenetv2.onnx", batch: int = 1,
-           opset: int = 17, seed: int = 0) -> str:
+           opset: int = 17, seed: int = 0, res: int = 224) -> str:
     import torch
     import torchvision
 
@@ -21,7 +21,7 @@ def export(path: str = "examples/mobilenetv2.onnx", batch: int = 1,
     torch.manual_seed(seed)
     model = torchvision.models.mobilenet_v2(weights=None)
     model.eval()
-    dummy = torch.randn(batch, 3, 224, 224)
+    dummy = torch.randn(batch, 3, res, res)
     # Untrained MobileNetV2 shrinks activations to ~1e-8 at the logits, below
     # the harness atol — parity checks would pass vacuously. Rescale to O(1).
     lsuv_calibrate(model, dummy)
@@ -33,7 +33,7 @@ def export(path: str = "examples/mobilenetv2.onnx", batch: int = 1,
         do_constant_folding=False,
         dynamic_axes=None,
     )
-    print(f"wrote {path} (batch={batch}, opset={opset}, seed={seed})")
+    print(f"wrote {path} (batch={batch}, res={res}, opset={opset}, seed={seed})")
     return path
 
 
@@ -43,5 +43,7 @@ if __name__ == "__main__":
     ap.add_argument("--batch", type=int, default=1)
     ap.add_argument("--opset", type=int, default=17)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--res", type=int, default=224,
+                    help="input H=W (reduced sizes for sim-path tests)")
     args = ap.parse_args()
-    export(args.out, args.batch, args.opset, args.seed)
+    export(args.out, args.batch, args.opset, args.seed, args.res)

@@ -5,6 +5,31 @@ and the deliberate limitations to close next. The exhaustive measured gap
 inventory (per-model fallbacks, RepViT op set, audit findings) lives in
 [GAPS.md](GAPS.md).
 
+## Phase 1 (2026-07-04) — total op coverage: zero host fallbacks on all 3 models
+
+- **ResNet-18, MobileNetV2, RepViT-m0_9 all compile with `host fallbacks:
+  none`** and pass ORT parity (per-model launch tables in GAPS.md).
+- Direct depthwise conv kernel: `blockIdx.z = n·C+c`, shared-memory input
+  tile with halo, staged per-channel filter, fully-unrolled K×K, fused
+  bias+activation epilogue, channel multiplier, `direct_load` tuner variant.
+  125 sim-parity tests (96-config cross-product + 25 randomized + fused
+  emit-path at N∈{1,2,8} and mult=2).
+- Batch-N conv fixed: per-image im2col+GEMM launch pairs with explicit
+  element offsets; N∈{1,2,8} permanent in conv parity tests.
+- Elementwise codegen generalized: NumPy-style broadcasting via baked
+  stride-0 index expressions (SE's (N,C,1,1)⊙(N,C,H,W) gate), non-scalar
+  constants as buffers, Clip bounds from inputs, Erf; lone elementwise ops
+  lower through the same emitter — never to host.
+- New kernels: spatial-mean reduction (one block per (n,c), deterministic
+  smem tree — GlobalAveragePool + ReduceMean[2,3]), MaxPool; Flatten/Reshape/
+  Squeeze/Unsqueeze/Identity are metadata-only views (buffer aliases).
+- General grouped conv (1<g<C_in): per-(image,group) im2col+GEMM slices on
+  the device path.
+- cpu_sim: content-addressed exe cache (~/.cache/mdlc-sim) — whole-model
+  simulation and 100+-kernel parity sweeps became tractable.
+- GPU executor updated for all new launch kinds + offsets (device validation
+  is the Phase 2 gate).
+
 ## Phase 0 (2026-07-04) — ground-truth audit: complete
 
 - Headline ResNet-18 numbers (141→32, 12 kernels, 65% memory) reproduced from
@@ -60,22 +85,25 @@ caught at the stage that introduced it, not days later.
 `cuda_available()` is the single gate. This machine has an Intel iGPU, so that
 returns `False` and the GPU code is never entered.
 
-## Known gaps / next steps (measured inventory in GAPS.md)
+## Known gaps / next steps (measured inventory in GAPS.md §9)
 
-1. **Grouped & depthwise conv** fall back to the host executor (the im2col→GEMM
-   path assumes `group==1`). MobileNet/RepViT lean on depthwise — needs a
-   depthwise conv kernel template. *Highest-value next item.*
-2. **Conv codegen is batch-1** (im2col lowers one CHW image). Loop over N, or
-   batch the im2col, for N>1. Verified: N=1 passes, N∈{2,8} crash at reshape.
+1. ~~Grouped & depthwise conv host fallback~~ **closed** (direct depthwise
+   kernel; per-group slices for general grouped) — Phase 1.
+2. ~~Conv codegen batch-1 only~~ **closed** (per-image launch pairs; N∈{1,2,8}
+   tested) — Phase 1. Batched-N still costs N× launches; implicit GEMM or
+   column-batching is the Phase 4 fix.
 3. **GEMM `alpha`/`beta` ≠ 1** aren't applied in the kernel epilogue (fine for
    standard inference Gemm/Linear; fold them in for generality).
-4. **Pooling / softmax / reshape** are host fallbacks. Cheap and correct, but a
-   production lowering would emit kernels (esp. pooling for conv nets).
-5. **Implicit GEMM** (gather patches inside the GEMM K-loop) would remove the
+4. ~~Pooling / reshape host fallbacks~~ **closed** (reduce/pool kernels,
+   views). Softmax/Transpose/Concat/Pad remain host-listed — no target model
+   hits them; any report that does will say so.
+5. **Memory-planner alignment**: pooled offsets need a 256-byte guarantee
+   before GPU bring-up (Phase 2).
+6. **Implicit GEMM** (gather patches inside the GEMM K-loop) would remove the
    im2col scratch buffer — the documented stretch over the current explicit
    im2col.
-6. **INT8 / DP4A quantized-GEMM** path — the Samsung/RepViT tie-in stretch.
-7. **No tensor cores / no double-buffering** in the GEMM — this is why we expect
+7. **INT8 / DP4A quantized-GEMM** path — the AIMET/RepViT tie-in (Phase 3).
+8. **No tensor cores / no double-buffering** in the GEMM — this is why we expect
    to lose to cuBLAS/cuDNN and ORT, and we quantify the gap rather than hide it.
 
 ## Interview talking points this codebase supports
