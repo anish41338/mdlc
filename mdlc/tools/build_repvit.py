@@ -53,6 +53,7 @@ def export(
         opset_version=opset,
         do_constant_folding=False,   # leave folding to *our* pass
         dynamic_axes=None,           # fixed batch: kernels specialize on shape
+        dynamo=False,  # legacy exporter: avoids the dynamo->opset18->downgrade path breaking on some ops
     )
     print(f"wrote {path} ({variant}, batch={batch}, res={res}, opset={opset}, "
           f"seed={seed})")

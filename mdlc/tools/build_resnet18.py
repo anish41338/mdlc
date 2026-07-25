@@ -25,6 +25,7 @@ def export(path: str = "examples/resnet18.onnx", batch: int = 1, opset: int = 17
         opset_version=opset,
         do_constant_folding=False,   # leave folding to *our* pass
         dynamic_axes=None,
+        dynamo=False,  # legacy exporter: avoids the dynamo->opset18->downgrade path breaking on some ops
     )
     print(f"wrote {path}")
     return path

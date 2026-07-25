@@ -32,6 +32,7 @@ def export(path: str = "examples/mobilenetv2.onnx", batch: int = 1,
         opset_version=opset,
         do_constant_folding=False,
         dynamic_axes=None,
+        dynamo=False,  # legacy exporter: avoids the dynamo->opset18->downgrade path breaking on some ops
     )
     print(f"wrote {path} (batch={batch}, res={res}, opset={opset}, seed={seed})")
     return path
