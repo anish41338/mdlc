@@ -13,7 +13,7 @@ mkdir -p "$OUT"
 # ---- 0. environment ---------------------------------------------------------
 nvidia-smi | tee "$OUT/nvidia_smi.txt"
 python -m pip install -q -e ".[ref,dev]"
-python -m pip install -q onnxruntime-gpu timm  # torch/torchvision preinstalled on Kaggle
+python -m pip install -q onnxruntime-gpu timm onnxscript  # torch/torchvision preinstalled on Kaggle
 python - <<'EOF'
 from mdlc.codegen.cuda.nvrtc_runtime import cuda_available, CudaContext
 assert cuda_available(), "CUDA driver/NVRTC not found - is the GPU accelerator on?"
