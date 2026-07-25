@@ -54,6 +54,86 @@ def _cuda_libs():
 _DRIVER, _NVRTC = _cuda_libs()
 
 
+# ----- driver prototypes --------------------------------------------------
+#
+# ctypes defaults every undeclared argument to C `int`. That silently truncates
+# the 64-bit values in this API — `CUdeviceptr` is an `unsigned long long` and
+# the copy/alloc sizes are `size_t` — so the prototypes are declared explicitly
+# rather than relying on the ABI zero-extending a 32-bit register write.
+#
+# The driver also ships versioned entry points: the *unsuffixed* `cuMemAlloc`,
+# `cuMemcpy*` and `cuCtxCreate` symbols in libcuda are the legacy v1 ABI (32-bit
+# sizes), and the CUDA headers `#define` them to `_v2`. dlsym/ctypes bypasses
+# those macros, so resolve `_v2` first and fall back only if absent.
+CUdeviceptr = ctypes.c_ulonglong
+
+
+def _sym(name: str):
+    """Resolve a driver symbol, preferring the modern `_v2` ABI."""
+    if _DRIVER is None:
+        return None
+    for candidate in (f"{name}_v2", name):
+        fn = getattr(_DRIVER, candidate, None)
+        if fn is not None:
+            return fn
+    return None
+
+
+def _declare_driver_prototypes() -> None:
+    if _DRIVER is None:
+        return
+    protos = {
+        "cuInit": [ctypes.c_uint],
+        "cuDeviceGetCount": [ctypes.POINTER(ctypes.c_int)],
+        "cuDeviceGet": [ctypes.POINTER(ctypes.c_int), ctypes.c_int],
+        "cuDeviceGetAttribute": [ctypes.POINTER(ctypes.c_int), ctypes.c_int,
+                                 ctypes.c_int],
+        "cuDeviceGetName": [ctypes.c_char_p, ctypes.c_int, ctypes.c_int],
+        "cuCtxSynchronize": [],
+        "cuModuleLoadData": [ctypes.POINTER(ctypes.c_void_p), ctypes.c_char_p],
+        "cuModuleGetFunction": [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p,
+                                ctypes.c_char_p],
+        "cuLaunchKernel": [ctypes.c_void_p,
+                           ctypes.c_uint, ctypes.c_uint, ctypes.c_uint,
+                           ctypes.c_uint, ctypes.c_uint, ctypes.c_uint,
+                           ctypes.c_uint, ctypes.c_void_p,
+                           ctypes.POINTER(ctypes.c_void_p),
+                           ctypes.POINTER(ctypes.c_void_p)],
+        "cuEventCreate": [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint],
+        "cuEventRecord": [ctypes.c_void_p, ctypes.c_void_p],
+        "cuEventSynchronize": [ctypes.c_void_p],
+        "cuEventElapsedTime": [ctypes.POINTER(ctypes.c_float), ctypes.c_void_p,
+                               ctypes.c_void_p],
+    }
+    for name, argtypes in protos.items():
+        fn = getattr(_DRIVER, name, None)
+        if fn is not None:
+            fn.argtypes = argtypes
+            fn.restype = ctypes.c_int
+
+    # Versioned entry points, declared on the resolved `_v2` object.
+    # `CUdeviceptr` is an integer handle, but it is the same 64-bit width as a
+    # pointer, so the module keeps `c_void_p` as its single pointer currency
+    # (see `GpuExecutor._off`, which does arithmetic on `.value`). What matters
+    # here is that the *sizes* are `size_t`, not `int`.
+    versioned = {
+        "cuCtxCreate": [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint,
+                        ctypes.c_int],
+        "cuMemAlloc": [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t],
+        "cuMemFree": [ctypes.c_void_p],
+        "cuMemcpyHtoD": [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t],
+        "cuMemcpyDtoH": [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t],
+    }
+    for name, argtypes in versioned.items():
+        fn = _sym(name)
+        if fn is not None:
+            fn.argtypes = argtypes
+            fn.restype = ctypes.c_int
+
+
+_declare_driver_prototypes()
+
+
 def cuda_available() -> bool:
     """True iff the CUDA driver + NVRTC are present and a device initializes."""
     if _DRIVER is None or _NVRTC is None:
@@ -160,10 +240,17 @@ class CudaModule:
         for i, a in enumerate(args):
             keep.append(a)
             kargs[i] = ctypes.cast(ctypes.byref(a), ctypes.c_void_p)
-        gx, gy, gz = (list(grid) + [1, 1])[:3]
-        bx, by, bz = (list(block) + [1, 1])[:3]
+        # int() rather than pass-through: a numpy integer from a shape
+        # computation has no ctypes conversion and would raise at the FFI
+        # boundary on device only.
+        gx, gy, gz = (int(v) for v in (list(grid) + [1, 1])[:3])
+        bx, by, bz = (int(v) for v in (list(block) + [1, 1])[:3])
+        if bx * by * bz > 1024:
+            raise CudaError(
+                f"{name}: {bx * by * bz} threads/block exceeds the CUDA limit "
+                f"of 1024 (block={bx},{by},{bz})")
         _ck(_DRIVER.cuLaunchKernel(f, gx, gy, gz, bx, by, bz,
-                                   shared_bytes, None, kargs, None),
+                                   int(shared_bytes), None, kargs, None),
             f"cuLaunchKernel({name})")
 
 
@@ -178,7 +265,7 @@ class CudaContext:
         _ck(_DRIVER.cuDeviceGet(ctypes.byref(dev), device), "cuDeviceGet")
         self.device = dev
         self._ctx = ctypes.c_void_p()
-        _ck(_DRIVER.cuCtxCreate(ctypes.byref(self._ctx), 0, dev), "cuCtxCreate")
+        _ck(_sym("cuCtxCreate")(ctypes.byref(self._ctx), 0, dev), "cuCtxCreate")
         self.arch = self._compute_arch()
 
     def _compute_arch(self) -> str:
@@ -195,22 +282,24 @@ class CudaContext:
 
     def malloc(self, nbytes: int) -> ctypes.c_void_p:
         ptr = ctypes.c_void_p()
-        _ck(_DRIVER.cuMemAlloc(ctypes.byref(ptr), nbytes), "cuMemAlloc")
+        _ck(_sym("cuMemAlloc")(ctypes.byref(ptr), int(nbytes)), "cuMemAlloc")
         return ptr
 
     def free(self, ptr: ctypes.c_void_p) -> None:
-        _ck(_DRIVER.cuMemFree(ptr), "cuMemFree")
+        _ck(_sym("cuMemFree")(ptr), "cuMemFree")
 
     def to_device(self, arr: np.ndarray) -> ctypes.c_void_p:
         arr = np.ascontiguousarray(arr)
         ptr = self.malloc(arr.nbytes)
-        _ck(_DRIVER.cuMemcpyHtoD(ptr, arr.ctypes.data_as(ctypes.c_void_p), arr.nbytes),
+        _ck(_sym("cuMemcpyHtoD")(ptr, arr.ctypes.data_as(ctypes.c_void_p),
+                                 int(arr.nbytes)),
             "cuMemcpyHtoD")
         return ptr
 
     def from_device(self, ptr: ctypes.c_void_p, shape, dtype=np.float32) -> np.ndarray:
         out = np.empty(shape, dtype=dtype)
-        _ck(_DRIVER.cuMemcpyDtoH(out.ctypes.data_as(ctypes.c_void_p), ptr, out.nbytes),
+        _ck(_sym("cuMemcpyDtoH")(out.ctypes.data_as(ctypes.c_void_p), ptr,
+                                 int(out.nbytes)),
             "cuMemcpyDtoH")
         return out
 

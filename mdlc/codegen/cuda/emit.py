@@ -131,16 +131,22 @@ class CudaCodegen:
             raise ValueError(f"{name!r} lacks a static shape; run shape inference")
         return tuple(int(d) for d in info.shape)
 
-    def _emit_gemm(self, M, N, K, *, with_bias, bias_mode, activation, attrs) -> str:
+    def _emit_gemm(self, M, N, K, *, with_bias, bias_mode, activation, attrs,
+                   trans_a: bool = False, trans_b: bool = False) -> str:
         sched = self.schedule_fn(None, (M, N, K))
+        # trans_a/trans_b are part of the identity: they change the emitted
+        # load indices, so a transposed Gemm must not reuse a plain one's kernel.
         sig = (sched.key(), with_bias, bias_mode, activation,
                attrs.get("clip_min"), attrs.get("clip_max"), attrs.get("alpha"),
-               attrs.get("beta"))
+               attrs.get("beta"), trans_a, trans_b)
         if sig in self._gemm_cache:
             return self._gemm_cache[sig]
-        name = f"gemm_{sched.key()}_{activation or 'none'}_{bias_mode}_{len(self._gemm_cache)}"
+        tag = f"{'ta' if trans_a else ''}{'tb' if trans_b else ''}" or "nt"
+        name = (f"gemm_{sched.key()}_{activation or 'none'}_{bias_mode}_{tag}"
+                f"_{len(self._gemm_cache)}")
         _, src = T.gemm_kernel(name, sched, with_bias=with_bias,
-                               bias_mode=bias_mode, activation=activation, attrs=attrs)
+                               bias_mode=bias_mode, activation=activation,
+                               attrs=attrs, trans_a=trans_a, trans_b=trans_b)
         self.kernels[name] = src
         self._gemm_cache[sig] = name
         return name
@@ -417,16 +423,29 @@ class CudaCodegen:
         M = ashape[1] if transA else ashape[0]
         K = ashape[0] if transA else ashape[1]
         N = bshape[0] if transB else bshape[1]
+        # ONNX Gemm is Y = alpha*A'*B' + beta*C, but the emitted epilogue only
+        # computes A'*B' + bias. Inference exports emit alpha=beta=1.0; any
+        # other value would be applied by neither executor, so fail loudly at
+        # lowering time rather than return a quietly wrong tensor (GAPS §9.1).
+        alpha = float(a.get("alpha", 1.0))
+        beta = float(a.get("beta", 1.0))
+        if alpha != 1.0 or (has_bias and beta != 1.0):
+            raise NotImplementedError(
+                f"Gemm {node.name or node.outputs[0]!r}: alpha={alpha} beta={beta}; "
+                "the GEMM epilogue applies neither (only A*B + bias). Fold them "
+                "into the weights/bias before lowering.")
         activation = a.get("activation")
         kname = self._emit_gemm(M, N, K, with_bias=bool(has_bias),
-                                bias_mode="col", activation=activation, attrs=node.attrs)
+                                bias_mode="col", activation=activation,
+                                attrs=node.attrs,
+                                trans_a=bool(transA), trans_b=bool(transB))
         sched = self.schedule_fn(None, (M, N, K))
         grid, block = self._grid_block_gemm(M, N, sched)
         inputs = [A, B] + ([node.inputs[2]] if has_bias else [])
         self.plan.append(Launch("gemm", kname, inputs, [node.outputs[0]], grid, block,
                                 meta={"M": M, "N": N, "K": K, "transA": transA,
-                                      "transB": transB, "alpha": a.get("alpha", 1.0),
-                                      "beta": a.get("beta", 1.0), "sched": sched,
+                                      "transB": transB, "alpha": alpha,
+                                      "beta": beta, "sched": sched,
                                       "with_bias": bool(has_bias), "node": node}))
 
     def _lower_matmul(self, g: Graph, node: Node) -> None:

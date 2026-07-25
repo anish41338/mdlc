@@ -4,6 +4,24 @@
 T4 notebook (see `tools/kaggle_notebook.md` for copy-paste cells) and commits
 the artifacts back. When this file is empty, Phase 2 GPU work is done.*
 
+## Run 1 status: attempted 2026-07-25 on a Kaggle **P100 (sm_60)**, not a T4
+
+Got as far as proving the device path had never executed. Three blockers found
+and fixed on the CPU side (see docs/GAPS.md "Phase 2 pre-flight"): the `gpu`
+marker matched no tests; emitted source `#include`d a toolkit header NVRTC
+cannot open; and `transA`/`transB` were applied only by the simulator, so the
+GPU path silently computed wrong results for every `nn.Linear` head. Re-run the
+checklist below now that those are fixed.
+
+Note the accelerator may be a **P100 (sm_60)**, not the T4 (sm_75) this runbook
+assumed. Consequences: NVRTC emits `compute_60` and warns that pre-`sm_75`
+architectures are deprecated (harmless); Kaggle's preinstalled PyTorch supports
+only `sm_70+`, so **torch cannot use that GPU** — mdlc goes through raw
+NVRTC/driver calls and is unaffected, but the `torch eager` benchmark column
+will not be collectable on a P100. `__dp4a` needs sm_61+, so the Phase 3 INT8
+path also cannot be validated on a P100. Prefer a T4 session for the benchmark
+and INT8 runs; a P100 is fine for correctness (`pytest -m gpu`).
+
 ## Run 1 — bring-up + tune + first honest benchmark (blocks Phase 2 sign-off)
 
 - [ ] 1. Run `bash tools/kaggle_run.sh` on a T4 notebook. It will:

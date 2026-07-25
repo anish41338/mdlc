@@ -55,6 +55,76 @@ def test_gemm_kernel_matches_numpy(sched, act, bias):
 
 
 @requires_gpp
+@pytest.mark.parametrize("trans_a,trans_b", [(False, True), (True, False), (True, True)])
+def test_gemm_kernel_handles_transposed_operands(trans_a, trans_b):
+    """ONNX transA/transB must be resolved *inside* the kernel.
+
+    Regression guard: the transpose used to be applied host-side by the sim
+    harness only, so the CPU path matched the reference while the device path
+    — which has no such step — silently computed a different result. Every
+    torch ``nn.Linear`` exports as ``Gemm(transB=1)``, so this hit the
+    classifier head of all three target models. The kernel now bakes the
+    layout into its load indices; this pins that behaviour.
+    """
+    from mdlc.codegen.cuda.cpu_sim import simulate_gemm
+
+    rng = np.random.default_rng(3)
+    M, N, K = 65, 48, 33            # non-tile-multiples exercise bounds checks
+    A_log = rng.standard_normal((M, K)).astype(np.float32)
+    B_log = rng.standard_normal((K, N)).astype(np.float32)
+    # Store each operand transposed exactly as ONNX would.
+    A = A_log.T.copy() if trans_a else A_log
+    B = B_log.T.copy() if trans_b else B_log
+
+    name, src = gemm_kernel("gt", DEFAULT_GEMM, with_bias=False, activation=None,
+                            trans_a=trans_a, trans_b=trans_b)
+    got = simulate_gemm(src, name, DEFAULT_GEMM, A, B, None, mnk=(M, N, K))
+    np.testing.assert_allclose(got, A_log @ B_log,
+                               rtol=FP32_REDUCTION.rtol, atol=FP32_REDUCTION.atol)
+
+
+@pytest.mark.parametrize("attrs", [{"alpha": 2.0}, {"beta": 0.5}])
+def test_gemm_rejects_unapplied_alpha_beta(attrs):
+    """alpha/beta are not in the epilogue, so lowering must refuse rather than
+    emit a kernel that quietly drops them (GAPS §9.1)."""
+    import numpy as np_
+    from onnx import TensorProto, helper, numpy_helper
+
+    from mdlc.codegen.cuda.emit import emit_cuda_module
+    from mdlc.frontend import import_onnx_model
+    from mdlc.passes.shape_inference import infer_shapes_by_execution
+
+    M, N, K = 4, 3, 5
+    w = np_.random.default_rng(0).standard_normal((K, N)).astype(np_.float32)
+    b = np_.random.default_rng(1).standard_normal(N).astype(np_.float32)
+    node = helper.make_node("Gemm", ["x", "w", "b"], ["y"], **attrs)
+    model = helper.make_model(
+        helper.make_graph(
+            [node], "t",
+            [helper.make_tensor_value_info("x", TensorProto.FLOAT, [M, K])],
+            [helper.make_tensor_value_info("y", TensorProto.FLOAT, [M, N])],
+            [numpy_helper.from_array(w, "w"), numpy_helper.from_array(b, "b")]),
+        opset_imports=[helper.make_opsetid("", 17)])
+    model.ir_version = 9
+    g = import_onnx_model(model)
+    feeds = {"x": np_.zeros((M, K), np_.float32)}
+    infer_shapes_by_execution(g, feeds)
+    with pytest.raises(NotImplementedError, match="alpha|beta"):
+        emit_cuda_module(g)
+
+
+def test_transposed_gemm_emits_distinct_index_math():
+    """The specialization is real: transposed variants differ in source and do
+    not collide in the emitter's kernel cache."""
+    src_plain = gemm_kernel("g0", DEFAULT_GEMM)[1]
+    src_tb = gemm_kernel("g0", DEFAULT_GEMM, trans_b=True)[1]
+    src_ta = gemm_kernel("g0", DEFAULT_GEMM, trans_a=True)[1]
+    assert src_plain != src_tb != src_ta
+    assert "B[gc * K + gr]" in src_tb and "B[gr * N + gc]" in src_plain
+    assert "A[gc * M + gr]" in src_ta and "A[gr * K + gc]" in src_plain
+
+
+@requires_gpp
 def test_im2col_kernel_matches_numpy():
     from mdlc.codegen.cuda.cpu_sim import simulate_im2col
 

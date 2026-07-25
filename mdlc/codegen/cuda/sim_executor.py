@@ -86,14 +86,16 @@ def simulate_module(module: CudaModule, feeds: dict[str, np.ndarray],
                 env[oname][m.get("batch_index", 0), oc0:oc1] = \
                     out.reshape(oc1 - oc0, oh, ow)
             else:                                   # plain Gemm/MatMul
+                # No host-side transpose: transA/transB are baked into the
+                # emitted kernel's load indices, so the operands are passed
+                # exactly as the device path passes them. Transposing here
+                # would double-transpose, and used to be the only reason the
+                # sim agreed with the reference while the GPU path did not.
                 A = env[launch.inputs[0]].astype(np.float32)
                 B = env[launch.inputs[1]].astype(np.float32)
-                if m.get("transA"):
-                    A = A.T.copy()
-                if m.get("transB"):
-                    B = B.T.copy()
                 bias = env[launch.inputs[2]].astype(np.float32) if m.get("with_bias") else None
-                out = simulate_gemm(src, launch.kernel_name, sched, A, B, bias)
+                out = simulate_gemm(src, launch.kernel_name, sched, A, B, bias,
+                                    mnk=(m["M"], m["N"], m["K"]))
                 env[launch.outputs[0]] = out
 
         elif launch.kind == "elementwise":

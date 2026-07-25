@@ -52,6 +52,15 @@ __thread dim3 threadIdx;
 #ifndef CUDART_INF_F
 #define CUDART_INF_F (__builtin_huge_valf())
 #endif
+// Bit-cast intrinsics NVRTC provides built-in but g++ does not. The emitted
+// source defines CUDART_INF_F via __int_as_float when compiled by NVRTC; this
+// shim keeps that same source compilable here if the #ifndef above ever loses.
+static inline float __int_as_float(int x) {
+    float f; __builtin_memcpy(&f, &x, sizeof f); return f;
+}
+static inline int __float_as_int(float x) {
+    int i; __builtin_memcpy(&i, &x, sizeof i); return i;
+}
 
 // ---- int8 / DP4A emulation ------------------------------------------------
 // __dp4a: 4-way int8 dot product with int32 accumulate (sm_61+ intrinsic).
@@ -196,11 +205,23 @@ def _dump(workdir: str, name: str, arr: np.ndarray) -> str:
     return path
 
 
-def simulate_gemm(source, kernel_name, sched, A, B, bias):
-    """Compile+run a generated GEMM kernel on CPU; return C = A@B (+bias)->act."""
-    M, K = A.shape
-    K2, N = B.shape
-    assert K == K2
+def simulate_gemm(source, kernel_name, sched, A, B, bias, *, mnk=None):
+    """Compile+run a generated GEMM kernel on CPU; return C = A@B (+bias)->act.
+
+    ``mnk`` gives the *logical* (M, N, K) explicitly. It is required whenever an
+    operand is stored transposed (ONNX ``transA``/``transB``), because then the
+    array shapes no longer spell out (M,K) and (K,N) — the kernel resolves the
+    layout through its baked load indices, so only the element counts have to
+    agree here. Without it, dimensions are inferred as for the plain layout.
+    """
+    if mnk is not None:
+        M, N, K = (int(v) for v in mnk)
+        assert A.size == M * K, (A.shape, (M, K))
+        assert B.size == K * N, (B.shape, (K, N))
+    else:
+        M, K = A.shape
+        K2, N = B.shape
+        assert K == K2
     gx = (N + sched.BN - 1) // sched.BN
     gy = (M + sched.BM - 1) // sched.BM
     nthreads = sched.threads_per_block()

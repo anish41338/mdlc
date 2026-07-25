@@ -1,5 +1,28 @@
 # Status, GPU-gating, and known gaps
 
+## Phase 2 pre-flight (2026-07-25) — device path made executable
+
+First `pytest -m gpu` attempt on a Kaggle P100 proved the device path had never
+run a kernel. Fixed, with CPU-detectable guards so the class cannot recur
+(full write-up in [GAPS.md](GAPS.md) "Phase 2 pre-flight"):
+
+- `tests/test_gpu.py` — 24 device tests (the `gpu` marker previously matched
+  **nothing**, so `pytest -m gpu` exited 5 "no tests collected").
+- Emitted CUDA is now **self-contained**: NVRTC has no include search path, so
+  `#include <math_constants.h>` was fatal on device while the sim silently
+  stripped it. `tests/test_nvrtc_compat.py` asserts the invariant on CPU.
+- **`transA`/`transB` are now resolved inside the GEMM kernel.** They had been
+  applied *only* host-side by the simulator, so the sim matched the reference
+  while the GPU path computed something different — wrong logits for every
+  `nn.Linear` head (all three target models). The transpose is baked into the
+  load indices and the sim's host-side transpose is gone, so both executors
+  now hand the kernel byte-identical buffers.
+- ctypes driver layer: explicit `argtypes` (32-bit `int` was standing in for
+  `size_t`) and `_v2` entry-point resolution.
+- Exporters pin the legacy TorchScript ONNX exporter (`dynamo=False`); newer
+  torch defaults to a dynamo path that targets opset 18 and then fails
+  converting down to our frozen 17.
+
 A snapshot of what is built and verified, what only activates on a CUDA device,
 and the deliberate limitations to close next. The exhaustive measured gap
 inventory (per-model fallbacks, RepViT op set, audit findings) lives in

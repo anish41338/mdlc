@@ -19,6 +19,25 @@ from mdlc.codegen.schedule import GemmSchedule
 from mdlc.ir import Node
 
 
+# ----- emitted-source preamble --------------------------------------------
+#
+# Every kernel we emit must compile with **no include search path at all**:
+# NVRTC compiles from a string in-process and cannot open CUDA toolkit headers
+# (a toolkit `#include` is a `catastrophic error: could not open source file`
+# there). So the source carries its own definitions instead.
+#
+# CUDART_INF_F is the only toolkit constant the templates use (unbounded Clip
+# bounds, and the MaxPool identity). `__int_as_float` is a core device
+# intrinsic that NVRTC provides built-in without any header, so this is exact
+# IEEE +inf rather than a FLT_MAX approximation. The `#ifndef` guard lets the
+# CPU simulator's preamble (which defines it via `__builtin_huge_valf`, as
+# g++ has no `__int_as_float`) win when the same source is compiled for the
+# sim — one source string, both backends, no textual rewriting.
+PREAMBLE = """#ifndef CUDART_INF_F
+#define CUDART_INF_F __int_as_float(0x7f800000)
+#endif"""
+
+
 # ----- activation epilogue ------------------------------------------------
 
 def activation_expr(activation: Optional[str], var: str, attrs: dict) -> str:
@@ -63,6 +82,8 @@ def gemm_kernel(
     bias_mode: str = "col",
     activation: Optional[str] = None,
     attrs: Optional[dict] = None,
+    trans_a: bool = False,
+    trans_b: bool = False,
 ) -> tuple[str, str]:
     """Generate a row-major SGEMM: C[MxN] = A[MxK] @ B[KxN] (+ bias) -> act.
 
@@ -74,10 +95,21 @@ def gemm_kernel(
     ``bias_mode`` selects the broadcast axis: ``"col"`` adds ``bias[col]`` (the
     Linear/Gemm case, bias per output feature) and ``"row"`` adds ``bias[row]``
     (the conv-as-GEMM case, bias per output channel).
+
+    ``trans_a``/``trans_b`` correspond to ONNX Gemm's ``transA``/``transB``: the
+    operand is stored transposed, so only the *global load index* changes — the
+    logical (m, k)/(k, n) iteration space is untouched, and the transpose costs
+    nothing at runtime because it is baked into the address arithmetic. This is
+    what makes ``transB=1`` (how every torch ``nn.Linear`` exports, weights held
+    as [N, K]) correct without materializing a transposed copy — a host-side
+    transpose would be invisible to the device path.
     """
     attrs = attrs or {}
     BM, BN, BK, TM, TN = sched.BM, sched.BN, sched.BK, sched.TM, sched.TN
     bias_param = "const float* __restrict__ bias, " if with_bias else ""
+    # A holds logical element (m=gr, k=gc); B holds logical (k=gr, n=gc).
+    a_index = "gc * M + gr" if trans_a else "gr * K + gc"
+    b_index = "gc * K + gr" if trans_b else "gr * N + gc"
     epi_var = "v"
     if with_bias:
         bias_idx = "row" if bias_mode == "row" else "col"
@@ -87,7 +119,7 @@ def gemm_kernel(
     act_store = activation_expr(activation, epi_var, attrs)
 
     src = f"""
-#include <math_constants.h>
+{PREAMBLE}
 extern "C" __global__ void {name}(
         const float* __restrict__ A,
         const float* __restrict__ B,
@@ -118,13 +150,13 @@ extern "C" __global__ void {name}(
         for (int idx = tid; idx < BM * BK; idx += numThreads) {{
             int r = idx / BK, c = idx % BK;
             int gr = blockRow + r, gc = k0 + c;
-            As[c][r] = (gr < M && gc < K) ? A[gr * K + gc] : 0.0f;
+            As[c][r] = (gr < M && gc < K) ? A[{a_index}] : 0.0f;
         }}
         // stage B (BK x BN) into Bs[BK][BN]
         for (int idx = tid; idx < BK * BN; idx += numThreads) {{
             int r = idx / BN, c = idx % BN;
             int gr = k0 + r, gc = blockCol + c;
-            Bs[r][c] = (gr < K && gc < N) ? B[gr * N + gc] : 0.0f;
+            Bs[r][c] = (gr < K && gc < N) ? B[{b_index}] : 0.0f;
         }}
         __syncthreads();
 
@@ -287,7 +319,7 @@ def depthwise_conv_kernel(
     __syncthreads();"""
 
     src = f"""
-#include <math_constants.h>
+{PREAMBLE}
 extern "C" __global__ void {name}(
         const float* __restrict__ x,     // [N, {C}, {H}, {W}]
         const float* __restrict__ w,     // [{c_out}, 1, {KH}, {KW}]
@@ -378,7 +410,7 @@ def maxpool_kernel(name: str, *, H: int, W: int, OH: int, OW: int,
     """One thread per output element, flat over N*C*OH*OW. Out-of-bounds
     window taps are skipped (ONNX MaxPool padding semantics: -inf identity)."""
     src = f"""
-#include <math_constants.h>
+{PREAMBLE}
 extern "C" __global__ void {name}(
         const float* __restrict__ x,
         float* __restrict__ y) {{
@@ -817,7 +849,7 @@ def elementwise_kernel(
         body.append(f"    {var(o)}_p[i] = {var(o)};")
 
     src = f"""
-#include <math_constants.h>
+{PREAMBLE}
 extern "C" __global__ void {name}({params}, {out_params}, int N) {{
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;

@@ -25,6 +25,52 @@ GlobalAveragePool reduction kernel (deterministic smem tree), MaxPool kernel,
 Flatten/Reshape/Squeeze/Unsqueeze/Identity as metadata-only views, Erf +
 ReduceMean in the reference executor.
 
+## Phase 2 pre-flight (2026-07-25): three device-path bugs found *without* a GPU
+
+The first real `pytest -m gpu` attempt on a Kaggle P100 (sm_60) exposed that the
+device path had never executed a single kernel. Three defects, each invisible to
+the CPU simulator by construction:
+
+1. **No `gpu` marker existed.** `pytest -m gpu` collected 0 tests and exited 5
+   — so "written but not yet device-validated" (§9.5) was optimistic: there was
+   nothing to run. `tests/test_gpu.py` now carries 24 device tests mirroring the
+   sim suite (depthwise, grouped, batch-N offsets, reduce/pool/view, pooled
+   allocator, both target models); the marker is registered in `pyproject.toml`.
+2. **Emitted source was not self-contained.** Four templates opened
+   `#include <math_constants.h>`. NVRTC compiles a string with no include search
+   path, so this is a `catastrophic error` on device — while the sim compiled
+   happily, because its shim *textually strips that line* and defines the
+   constant itself. Templates now carry a `PREAMBLE` defining `CUDART_INF_F` as
+   `__int_as_float(0x7f800000)` (verbatim how the toolkit header defines it).
+   `tests/test_nvrtc_compat.py` asserts self-containment on CPU.
+3. **`transA`/`transB` were silently ignored on device.** `_lower_gemm` recorded
+   them in meta, but the emitted kernel assumed row-major `A[MxK] @ B[KxN]`, and
+   **only `sim_executor` compensated — by transposing the operands host-side.**
+   The sim therefore matched the reference while the GPU path computed a
+   different result, with no test able to see it. Since every torch
+   `nn.Linear` exports as `Gemm(transB=1)`, this was wrong output for the
+   classifier head of all three target models. Fixed at the right level: the
+   transpose is baked into the kernel's load indices
+   (`B[gc * K + gr]`), costs nothing at runtime, works for activations as well
+   as weights, and the sim's host-side transpose is *removed* so both
+   executors now feed the kernel identical buffers. `trans_a`/`trans_b` are
+   part of the kernel-cache key. Pinned by
+   `test_gemm_kernel_handles_transposed_operands` (transA/transB/both) and
+   `test_transposed_gemm_emits_distinct_index_math`.
+
+Method note: (2) and (3) are both cases of *the simulator being more capable
+than the device* — a host harness silently repairing something the GPU cannot.
+That asymmetry, not kernel math, is where the device-path bugs were. The
+`test_nvrtc_compat.py` guards (no includes, launch dims are plain `int`,
+≤1024 threads/block, y/z grid ≤65535) exist to keep that class CPU-detectable.
+
+Also hardened while auditing (unvalidated-on-device code, no behaviour change
+on CPU): the ctypes driver layer now declares `argtypes`/`restype` rather than
+letting every undeclared argument default to C `int` (`size_t` copy/alloc sizes
+were being passed as 32-bit), and resolves the `_v2` entry points that the CUDA
+headers `#define` over `cuMemAlloc`/`cuMemcpy*`/`cuCtxCreate` — dlsym bypasses
+those macros and would otherwise bind the legacy 32-bit-size ABI.
+
 ## 1. Test-suite ground truth
 
 `python -m pytest -q -m "not gpu"` — **72 passed, 0 failed, 0 xfail** (42 at
@@ -112,8 +158,11 @@ tier requires a written numerical justification in that file + human sign-off.
 
 ## 9. Remaining measured gaps (Phase 2+ owners)
 
-1. GEMM `alpha`/`beta` ≠ 1 ignored in the kernel epilogue (fine for torch
-   exports which emit 1.0; assert at lowering time until fixed).
+1. GEMM `alpha`/`beta` ≠ 1 still not applied in the kernel epilogue (fine for
+   torch exports, which emit 1.0) — but **no longer silent**: as of the Phase 2
+   pre-flight, `_lower_gemm` raises `NotImplementedError` instead of emitting a
+   kernel that drops them (`test_gemm_rejects_unapplied_alpha_beta`). Folding
+   them into the weights/bias is the real fix.
 2. Memory planner has **no alignment guarantee** — offsets are raw byte
    sums. Phase 2 GPU bring-up needs 256-byte-aligned pool offsets (vectorized
    loads + coalescing); add `align=256` to the planner and an assert.
