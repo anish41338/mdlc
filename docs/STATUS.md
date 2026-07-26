@@ -2,38 +2,66 @@
 
 ## Phase 2 (2026-07-25) — it runs on a GPU, and here is what it costs
 
-Kaggle **Tesla T4 (sm_75)**, `artifacts/gpu_run_20260725_162618/`. The device
-gate is met: **`pytest -m gpu` 24/24** on the T4 (and again on a P100, sm_60) —
-depthwise, grouped conv, batch-N offsets, reduce/pool/views, the pooled
-allocator, and MobileNetV2 + RepViT end-to-end vs the ORT golden.
+Kaggle **Tesla T4 (sm_75)**, driver 580.159.04, CUDA 12.8, torch 2.10.0+cu128.
+Artifact: `artifacts/gpu_run_20260725_173804/`, generated at git `b1d581f`.
+Every number below is reproduced by `docs/BENCHMARKS.md`, which
+`mdlc.tools.gen_benchmarks` writes from `bench.json` — none are hand-typed.
 
-Measured autotuning: 55 GEMM shapes + 17 depthwise signatures, 72 cache entries
-per architecture, ≤64 configs each, median-of-50 CUDA-event samples, noisy
-configs discarded. Best GEMM win **70.9%** over the naive default
-(`512x49x4608`); depthwise wins 1.7–26.8%. The pattern is what an honest tuner
-looks like: the big wins are tall-skinny classifier GEMMs, and shapes the
-default already suited win ~0% (`576x196x96`: 0.0%).
+The device gate is met: **`pytest -m gpu` 24/24** on the T4 (and again on a
+P100, sm_60) — depthwise, grouped conv, batch-N offsets, reduce/pool/views, the
+pooled allocator, and MobileNetV2 + RepViT end-to-end vs the ORT golden.
 
-Latency, median ms, batch-1 and batch-8, vs PyTorch eager (cuDNN,
-`cudnn.benchmark=True`) on the same card:
+Measured autotuning: 55 GEMM shapes + 17 depthwise signatures, **72 cache
+entries** (all `sm_75`), ≤64 configs each, median-of-50 CUDA-event samples,
+noisy configs discarded by an IQR gate. Best GEMM win **70.9%** over the naive
+default (`512x49x4608`); depthwise wins 1.7–26.8%. The shape of the result is
+what an honest tuner looks like: big wins on tall-skinny classifier GEMMs, and
+~0% where the default was already right (`576x196x96`: 0.0%).
+
+Latency, median ms over 200 iterations after 50 warmups, H2D/D2H excluded,
+CUDA-event timed, vs PyTorch eager (`cudnn.benchmark=True`) on the same card:
 
 | Model | b1 mdlc | b1 torch | b1 result | b8 mdlc | b8 torch | b8 result |
 |---|---|---|---|---|---|---|
-| MobileNetV2 | **2.218** | 5.738 | **2.59× faster** | 13.897 | 7.529 | 1.85× slower |
-| RepViT-m0_9 | **5.049** | 7.226 | **1.43× faster** | 30.744 | 8.134 | 3.78× slower |
-| ResNet-18 | 4.440 | 2.748 | 1.62× slower | 35.749 | 9.438 | 3.79× slower |
+| MobileNetV2 | **2.303** | 5.746 | **2.50× faster** | 13.882 | 7.743 | 1.79× slower |
+| RepViT-m0_9 | **5.186** | 7.259 | **1.40× faster** | 31.046 | 8.245 | 3.77× slower |
+| ResNet-18 | 4.400 | 2.728 | 1.61× slower | 35.822 | 9.559 | 3.75× slower |
+
+**Every one of those latencies is parity-checked on the device**: each mdlc row
+carries `parity_max_abs_vs_ort` against an ORT golden for the same seeded
+inputs — 1.5e-06 to 5.7e-06 across all six — with `host fallbacks: none`. A
+fast wrong answer is not a result, so the timing and the check ship together.
+
+Fewer launches, less memory (both from the same artifact), batch-1:
+
+| Model | mdlc launches | torch launches | mdlc device MB | torch device MB |
+|---|---|---|---|---|
+| ResNet-18 | 51 | 91 | 110.9 | 1193.2 |
+| MobileNetV2 | 99 | 153 | 35.8 | 971.0 |
+| RepViT-m0_9 | 255 | 290 | 45.2 | 714.6 |
+
+(The memory columns use each system's own accounting — ours is exact allocation
+bookkeeping, torch's is `max_memory_allocated` over a caching allocator — so
+read the order of magnitude, not the digits. The planner-managed activation
+pool is the precise number we control: 4.82 MB for ResNet-18 b1.)
 
 This is the result the design predicted, in both directions. **We win batch-1
 on the depthwise-heavy mobile models** — exactly where fusion and launch-count
 reduction pay and where cuDNN's conv kernels have least to work with. **We lose
-ResNet-18**, whose 3×3 dense convs are what cuDNN is most tuned for, and **we
-lose every batch-8 row by ~2–4×** because batched conv still issues *N separate
-im2col+GEMM launch pairs per conv* (GAPS §9.4). That is a known, documented,
+ResNet-18**, whose dense 3×3 convs are what cuDNN is most tuned for, and **we
+lose every batch-8 row by 1.8–3.8×** because batched conv still issues *N
+separate im2col+GEMM launch pairs per conv* (GAPS §9.4) — visible directly in
+the launch counts (ResNet-18 b1 51 → b8 331). That is a known, documented,
 Phase-4 gap — column-batching or implicit GEMM — now with a price tag on it
 rather than a guess.
 
-No ORT-CUDA column: the CUDA EP could not load (CUDA-13 wheel vs CUDA-12
-image). Optional Run 2 in `artifacts/GPU_TODO.md`; nothing depends on it.
+**Baseline caveat, stated plainly:** eager is the *soft* comparison — it pays
+Python dispatch per op, precisely the overhead a compiler exists to remove, so
+beating it is necessary but not sufficient. The ORT CUDA EP column is empty
+(its wheel targets CUDA 13, the image ships CUDA 12) and a `torch.compile`
+(Inductor) column is now wired into the harness but not yet run. Until both
+land, treat "2.50× faster than eager" as the honest but weakest-baseline claim
+that it is. Optional Run 2 in `artifacts/GPU_TODO.md` collects them.
 
 ## Phase 2 pre-flight (2026-07-25) — device path made executable
 

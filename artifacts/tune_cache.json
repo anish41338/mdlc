@@ -1,0 +1,832 @@
+{
+  "depthwise|f32|C144m1_H56W56_O28x28_K3x3_S2x2_P1x1_D1x1|sm_75": {
+    "default_metric": 0.03494400158524513,
+    "measured": true,
+    "metric": 0.02521600015461445,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 4,
+      "tile_w": 32
+    }
+  },
+  "depthwise|f32|C144m1_H56W56_O56x56_K3x3_S1x1_P1x1_D1x1|sm_75": {
+    "default_metric": 0.06140799820423126,
+    "measured": true,
+    "metric": 0.04710400104522705,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 8,
+      "tile_w": 32
+    }
+  },
+  "depthwise|f32|C192m1_H14W14_O14x14_K3x3_S1x1_P1x1_D1x1|sm_75": {
+    "default_metric": 0.019711999222636223,
+    "measured": true,
+    "metric": 0.01635199971497059,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 16,
+      "tile_w": 16
+    }
+  },
+  "depthwise|f32|C192m1_H14W14_O7x7_K3x3_S2x2_P1x1_D1x1|sm_75": {
+    "default_metric": 0.017023999243974686,
+    "measured": true,
+    "metric": 0.015200000256299973,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 8,
+      "tile_w": 8
+    }
+  },
+  "depthwise|f32|C192m1_H28W28_O14x14_K3x3_S2x2_P1x1_D1x1|sm_75": {
+    "default_metric": 0.020959999412298203,
+    "measured": true,
+    "metric": 0.018112000077962875,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 16,
+      "tile_w": 16
+    }
+  },
+  "depthwise|f32|C192m1_H28W28_O28x28_K3x3_S1x1_P1x1_D1x1|sm_75": {
+    "default_metric": 0.03481600061058998,
+    "measured": true,
+    "metric": 0.02486399933695793,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 4,
+      "tile_w": 32
+    }
+  },
+  "depthwise|f32|C32m1_H112W112_O112x112_K3x3_S1x1_P1x1_D1x1|sm_75": {
+    "default_metric": 0.057312000542879105,
+    "measured": true,
+    "metric": 0.0427200011909008,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 4,
+      "tile_w": 32
+    }
+  },
+  "depthwise|f32|C384m1_H14W14_O14x14_K3x3_S1x1_P1x1_D1x1|sm_75": {
+    "default_metric": 0.02454400062561035,
+    "measured": true,
+    "metric": 0.0197759997099638,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 8,
+      "tile_w": 16
+    }
+  },
+  "depthwise|f32|C384m1_H7W7_O7x7_K3x3_S1x1_P1x1_D1x1|sm_75": {
+    "default_metric": 0.01635199971497059,
+    "measured": true,
+    "metric": 0.015904000028967857,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 16,
+      "tile_w": 8
+    }
+  },
+  "depthwise|f32|C48m1_H56W56_O28x28_K3x3_S2x2_P1x1_D1x1|sm_75": {
+    "default_metric": 0.021023999899625778,
+    "measured": true,
+    "metric": 0.01817600056529045,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 4,
+      "tile_w": 16
+    }
+  },
+  "depthwise|f32|C48m1_H56W56_O56x56_K3x3_S1x1_P1x1_D1x1|sm_75": {
+    "default_metric": 0.030432000756263733,
+    "measured": true,
+    "metric": 0.024639999493956566,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 8,
+      "tile_w": 32
+    }
+  },
+  "depthwise|f32|C576m1_H14W14_O14x14_K3x3_S1x1_P1x1_D1x1|sm_75": {
+    "default_metric": 0.028672000393271446,
+    "measured": true,
+    "metric": 0.02252800017595291,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 8,
+      "tile_w": 16
+    }
+  },
+  "depthwise|f32|C576m1_H14W14_O7x7_K3x3_S2x2_P1x1_D1x1|sm_75": {
+    "default_metric": 0.018432000651955605,
+    "measured": true,
+    "metric": 0.018432000651955605,
+    "sched": {
+      "direct_load": false,
+      "tile_h": 8,
+      "tile_w": 8
+    }
+  },
+  "depthwise|f32|C960m1_H7W7_O7x7_K3x3_S1x1_P1x1_D1x1|sm_75": {
+    "default_metric": 0.020320000126957893,
+    "measured": true,
+    "metric": 0.01817600056529045,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 8,
+      "tile_w": 8
+    }
+  },
+  "depthwise|f32|C96m1_H112W112_O56x56_K3x3_S2x2_P1x1_D1x1|sm_75": {
+    "default_metric": 0.06329599767923355,
+    "measured": true,
+    "metric": 0.04505600035190582,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 8,
+      "tile_w": 32
+    }
+  },
+  "depthwise|f32|C96m1_H28W28_O14x14_K3x3_S2x2_P1x1_D1x1|sm_75": {
+    "default_metric": 0.017696000635623932,
+    "measured": true,
+    "metric": 0.015904000028967857,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 8,
+      "tile_w": 16
+    }
+  },
+  "depthwise|f32|C96m1_H28W28_O28x28_K3x3_S1x1_P1x1_D1x1|sm_75": {
+    "default_metric": 0.02454400062561035,
+    "measured": true,
+    "metric": 0.018783999606966972,
+    "sched": {
+      "direct_load": true,
+      "tile_h": 4,
+      "tile_w": 32
+    }
+  },
+  "gemm|f32|1280x49x320|sm_75": {
+    "default_metric": 0.10691200196743011,
+    "measured": true,
+    "metric": 0.0926079973578453,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 4
+    }
+  },
+  "gemm|f32|128x784x1152|sm_75": {
+    "default_metric": 0.4137279987335205,
+    "measured": true,
+    "metric": 0.3702079951763153,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 4
+    }
+  },
+  "gemm|f32|128x784x576|sm_75": {
+    "default_metric": 0.21913599967956543,
+    "measured": true,
+    "metric": 0.19443200528621674,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 4
+    }
+  },
+  "gemm|f32|128x784x64|sm_75": {
+    "default_metric": 0.046879999339580536,
+    "measured": true,
+    "metric": 0.03782400116324425,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|144x3136x24|sm_75": {
+    "default_metric": 0.06566400080919266,
+    "measured": true,
+    "metric": 0.042208001017570496,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 64,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|160x49x576|sm_75": {
+    "default_metric": 0.1757120043039322,
+    "measured": true,
+    "metric": 0.09894400089979172,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|160x49x960|sm_75": {
+    "default_metric": 0.2805759906768799,
+    "measured": true,
+    "metric": 0.15488000214099884,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|16x12544x32|sm_75": {
+    "default_metric": 0.06988800317049026,
+    "measured": true,
+    "metric": 0.03939199820160866,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 128,
+      "TM": 8,
+      "TN": 4
+    }
+  },
+  "gemm|f32|16x1x48|sm_75": {
+    "default_metric": 0.02864000014960766,
+    "measured": true,
+    "metric": 0.02287999913096428,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 32,
+      "TM": 2,
+      "TN": 4
+    }
+  },
+  "gemm|f32|192x196x384|sm_75": {
+    "default_metric": 0.12483199685811996,
+    "measured": true,
+    "metric": 0.10870400071144104,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 4
+    }
+  },
+  "gemm|f32|192x196x96|sm_75": {
+    "default_metric": 0.047040000557899475,
+    "measured": true,
+    "metric": 0.04211200028657913,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|192x1x48|sm_75": {
+    "default_metric": 0.02876799926161766,
+    "measured": true,
+    "metric": 0.023711999878287315,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 32,
+      "TM": 2,
+      "TN": 4
+    }
+  },
+  "gemm|f32|192x784x32|sm_75": {
+    "default_metric": 0.03481600061058998,
+    "measured": true,
+    "metric": 0.0306560005992651,
+    "sched": {
+      "BK": 16,
+      "BM": 64,
+      "BN": 64,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|192x784x96|sm_75": {
+    "default_metric": 0.057472001761198044,
+    "measured": true,
+    "metric": 0.053247999399900436,
+    "sched": {
+      "BK": 16,
+      "BM": 64,
+      "BN": 64,
+      "TM": 8,
+      "TN": 4
+    }
+  },
+  "gemm|f32|1x1000x1280|sm_75": {
+    "default_metric": 0.3608640134334564,
+    "measured": true,
+    "metric": 0.22617599368095398,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|1x1000x384|sm_75": {
+    "default_metric": 0.11564800143241882,
+    "measured": true,
+    "metric": 0.07964800298213959,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 32,
+      "TM": 2,
+      "TN": 4
+    }
+  },
+  "gemm|f32|1x1000x512|sm_75": {
+    "default_metric": 0.14883199334144592,
+    "measured": true,
+    "metric": 0.100832000374794,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 32,
+      "TM": 2,
+      "TN": 4
+    }
+  },
+  "gemm|f32|24x12544x27|sm_75": {
+    "default_metric": 0.07158400118350983,
+    "measured": true,
+    "metric": 0.04131200164556503,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 64,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|24x1x96|sm_75": {
+    "default_metric": 0.04092799872159958,
+    "measured": true,
+    "metric": 0.029952000826597214,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|24x3136x144|sm_75": {
+    "default_metric": 0.09443199634552002,
+    "measured": true,
+    "metric": 0.05990400165319443,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 32,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|24x3136x96|sm_75": {
+    "default_metric": 0.06985600292682648,
+    "measured": true,
+    "metric": 0.04620800167322159,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 32,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|256x196x1152|sm_75": {
+    "default_metric": 0.3323200047016144,
+    "measured": true,
+    "metric": 0.28441599011421204,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 4
+    }
+  },
+  "gemm|f32|256x196x128|sm_75": {
+    "default_metric": 0.057312000542879105,
+    "measured": true,
+    "metric": 0.04915200173854828,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|256x196x2304|sm_75": {
+    "default_metric": 0.6696959733963013,
+    "measured": true,
+    "metric": 0.47407999634742737,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|320x49x960|sm_75": {
+    "default_metric": 0.22937600314617157,
+    "measured": true,
+    "metric": 0.1542080044746399,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|32x12544x27|sm_75": {
+    "default_metric": 0.07168000191450119,
+    "measured": true,
+    "metric": 0.04217600077390671,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 128,
+      "TM": 8,
+      "TN": 4
+    }
+  },
+  "gemm|f32|32x784x144|sm_75": {
+    "default_metric": 0.05612799897789955,
+    "measured": true,
+    "metric": 0.04323200136423111,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 32,
+      "TM": 2,
+      "TN": 4
+    }
+  },
+  "gemm|f32|32x784x192|sm_75": {
+    "default_metric": 0.06825599819421768,
+    "measured": true,
+    "metric": 0.05222399905323982,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|384x196x192|sm_75": {
+    "default_metric": 0.09014400094747543,
+    "measured": true,
+    "metric": 0.07580800354480743,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|384x196x64|sm_75": {
+    "default_metric": 0.04707200080156326,
+    "measured": true,
+    "metric": 0.03686400130391121,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|384x1x96|sm_75": {
+    "default_metric": 0.04169600084424019,
+    "measured": true,
+    "metric": 0.02937600016593933,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|384x49x192|sm_75": {
+    "default_metric": 0.07158400118350983,
+    "measured": true,
+    "metric": 0.05289600044488907,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|384x49x768|sm_75": {
+    "default_metric": 0.22732800245285034,
+    "measured": true,
+    "metric": 0.15455999970436096,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 32,
+      "TM": 2,
+      "TN": 4
+    }
+  },
+  "gemm|f32|48x1x16|sm_75": {
+    "default_metric": 0.021215999498963356,
+    "measured": true,
+    "metric": 0.01974399946630001,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 32,
+      "TM": 2,
+      "TN": 2
+    }
+  },
+  "gemm|f32|48x1x192|sm_75": {
+    "default_metric": 0.06563200056552887,
+    "measured": true,
+    "metric": 0.04198399931192398,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|48x3136x216|sm_75": {
+    "default_metric": 0.13929599523544312,
+    "measured": true,
+    "metric": 0.10857599973678589,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 64,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|48x3136x96|sm_75": {
+    "default_metric": 0.07135999947786331,
+    "measured": true,
+    "metric": 0.059167999774217606,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 64,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|512x49x2304|sm_75": {
+    "default_metric": 0.6833279728889465,
+    "measured": true,
+    "metric": 0.3474560081958771,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|512x49x256|sm_75": {
+    "default_metric": 0.088128000497818,
+    "measured": true,
+    "metric": 0.06454399973154068,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 32,
+      "TM": 2,
+      "TN": 4
+    }
+  },
+  "gemm|f32|512x49x4608|sm_75": {
+    "default_metric": 1.3424320220947266,
+    "measured": true,
+    "metric": 0.3850240111351013,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|576x196x96|sm_75": {
+    "default_metric": 0.046592000871896744,
+    "measured": true,
+    "metric": 0.046592000871896744,
+    "sched": {
+      "BK": 16,
+      "BM": 64,
+      "BN": 64,
+      "TM": 4,
+      "TN": 4
+    }
+  },
+  "gemm|f32|64x12544x147|sm_75": {
+    "default_metric": 0.286080002784729,
+    "measured": true,
+    "metric": 0.18940800428390503,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 128,
+      "TM": 8,
+      "TN": 4
+    }
+  },
+  "gemm|f32|64x196x192|sm_75": {
+    "default_metric": 0.07276800274848938,
+    "measured": true,
+    "metric": 0.043327998369932175,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|64x196x384|sm_75": {
+    "default_metric": 0.12492799758911133,
+    "measured": true,
+    "metric": 0.07171200215816498,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|64x3136x576|sm_75": {
+    "default_metric": 0.33228799700737,
+    "measured": true,
+    "metric": 0.2794879972934723,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 64,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|768x49x384|sm_75": {
+    "default_metric": 0.12371200323104858,
+    "measured": true,
+    "metric": 0.10675200074911118,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 4
+    }
+  },
+  "gemm|f32|960x49x160|sm_75": {
+    "default_metric": 0.06348799914121628,
+    "measured": true,
+    "metric": 0.05689600110054016,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|96x12544x16|sm_75": {
+    "default_metric": 0.08934400230646133,
+    "measured": true,
+    "metric": 0.05734400078654289,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 64,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|96x196x384|sm_75": {
+    "default_metric": 0.12438400089740753,
+    "measured": true,
+    "metric": 0.08601599931716919,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 32,
+      "TM": 2,
+      "TN": 4
+    }
+  },
+  "gemm|f32|96x196x576|sm_75": {
+    "default_metric": 0.17606399953365326,
+    "measured": true,
+    "metric": 0.11907199770212173,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 32,
+      "TM": 2,
+      "TN": 4
+    }
+  },
+  "gemm|f32|96x1x24|sm_75": {
+    "default_metric": 0.024927999824285507,
+    "measured": true,
+    "metric": 0.020287999883294106,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|96x1x384|sm_75": {
+    "default_metric": 0.11472000181674957,
+    "measured": true,
+    "metric": 0.06867200136184692,
+    "sched": {
+      "BK": 32,
+      "BM": 32,
+      "BN": 32,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|96x3136x48|sm_75": {
+    "default_metric": 0.06496000289916992,
+    "measured": true,
+    "metric": 0.046592000871896744,
+    "sched": {
+      "BK": 8,
+      "BM": 32,
+      "BN": 128,
+      "TM": 8,
+      "TN": 2
+    }
+  },
+  "gemm|f32|96x784x192|sm_75": {
+    "default_metric": 0.08582399785518646,
+    "measured": true,
+    "metric": 0.06521599739789963,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 2
+    }
+  },
+  "gemm|f32|96x784x48|sm_75": {
+    "default_metric": 0.038047999143600464,
+    "measured": true,
+    "metric": 0.02969600073993206,
+    "sched": {
+      "BK": 16,
+      "BM": 32,
+      "BN": 64,
+      "TM": 4,
+      "TN": 2
+    }
+  }
+}

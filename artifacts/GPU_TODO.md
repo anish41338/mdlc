@@ -6,8 +6,9 @@ the artifacts back. When this file is empty, Phase 2 GPU work is done.*
 
 ## Run 1 — DONE (2026-07-25, Kaggle **Tesla T4, sm_75**)
 
-`artifacts/gpu_run_20260725_162618/`. **Phase 2's device gate is met**: the
-kernels execute on real hardware and agree with the oracle.
+`artifacts/gpu_run_20260725_173804/` — **committed to the repo**, together with
+`artifacts/tune_cache.json` and `docs/BENCHMARKS.md`. **Phase 2's device gate is
+met**: the kernels execute on real hardware and agree with the oracle.
 
 - [x] 1. `bash tools/kaggle_run.sh` completed end to end.
 - [x] 2. `pytest -q -m gpu` — **24/24 passed** on the T4, and again on a P100
@@ -21,12 +22,12 @@ kernels execute on real hardware and agree with the oracle.
 - [x] 4. Benchmark matrix ran; `docs/BENCHMARKS.md` regenerated. Numbers in
       docs/STATUS.md and docs/GAPS.md §11.
 
-### Still to commit from that run
+### Artifacts — committed ✔
 
-The artifacts live in the Kaggle zip, not yet in git:
-`artifacts/gpu_run_20260725_162618/` (bench.json, tune.json, logs,
-BENCHMARKS.md), `artifacts/tune_cache.json`, `docs/BENCHMARKS.md`. Commit them
-so every number in the docs is backed by a file in the repo.
+`artifacts/gpu_run_20260725_173804/` (bench.json, tune.json, BENCHMARKS.md,
+bench_log.txt, tune_log.txt, pytest_gpu.txt, nvidia_smi.txt),
+`artifacts/tune_cache.json` (72 `sm_75` entries), `docs/BENCHMARKS.md`. Every
+number in STATUS.md and GAPS.md §11 is reproduced by these files.
 
 ## Run 2 — OPTIONAL, buys exactly one thing: the ORT-CUDA baseline column
 

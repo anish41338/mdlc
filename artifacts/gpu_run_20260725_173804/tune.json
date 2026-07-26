@@ -1,0 +1,650 @@
+[
+  {
+    "key": "gemm|f32|1x1000x384|sm_75",
+    "best": "BM32_BN32_BK16_TM2_TN4",
+    "best_metric_ms": 0.07964800298213959,
+    "default_metric_ms": 0.11564800143241882,
+    "win_pct": 31.128941273850323,
+    "n_evaluated": 63,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|1x1000x512|sm_75",
+    "best": "BM32_BN32_BK16_TM2_TN4",
+    "best_metric_ms": 0.100832000374794,
+    "default_metric_ms": 0.14883199334144592,
+    "win_pct": 32.25112550668576,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|1x1000x1280|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN2",
+    "best_metric_ms": 0.22617599368095398,
+    "default_metric_ms": 0.3608640134334564,
+    "win_pct": 37.32376040243176,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|16x1x48|sm_75",
+    "best": "BM32_BN32_BK16_TM2_TN4",
+    "best_metric_ms": 0.02287999913096428,
+    "default_metric_ms": 0.02864000014960766,
+    "win_pct": 20.111735295232833,
+    "n_evaluated": 63,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|16x12544x32|sm_75",
+    "best": "BM32_BN128_BK8_TM8_TN4",
+    "best_metric_ms": 0.03939199820160866,
+    "default_metric_ms": 0.06988800317049026,
+    "win_pct": 43.63553626576977,
+    "n_evaluated": 61,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|24x1x96|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.029952000826597214,
+    "default_metric_ms": 0.04092799872159958,
+    "win_pct": 26.817822121387596,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|24x3136x96|sm_75",
+    "best": "BM32_BN32_BK8_TM8_TN2",
+    "best_metric_ms": 0.04620800167322159,
+    "default_metric_ms": 0.06985600292682648,
+    "win_pct": 33.85249694056494,
+    "n_evaluated": 60,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|24x3136x144|sm_75",
+    "best": "BM32_BN32_BK8_TM8_TN2",
+    "best_metric_ms": 0.05990400165319443,
+    "default_metric_ms": 0.09443199634552002,
+    "win_pct": 36.56387244635822,
+    "n_evaluated": 59,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|24x12544x27|sm_75",
+    "best": "BM32_BN64_BK8_TM8_TN2",
+    "best_metric_ms": 0.04131200164556503,
+    "default_metric_ms": 0.07158400118350983,
+    "win_pct": 42.28877827091661,
+    "n_evaluated": 60,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|32x784x144|sm_75",
+    "best": "BM32_BN32_BK16_TM2_TN4",
+    "best_metric_ms": 0.04323200136423111,
+    "default_metric_ms": 0.05612799897789955,
+    "win_pct": 22.976050898850414,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|32x784x192|sm_75",
+    "best": "BM32_BN64_BK32_TM4_TN2",
+    "best_metric_ms": 0.05222399905323982,
+    "default_metric_ms": 0.06825599819421768,
+    "win_pct": 23.488044369902735,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|32x12544x27|sm_75",
+    "best": "BM32_BN128_BK8_TM8_TN4",
+    "best_metric_ms": 0.04217600077390671,
+    "default_metric_ms": 0.07168000191450119,
+    "win_pct": 41.160714777583856,
+    "n_evaluated": 61,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|48x1x16|sm_75",
+    "best": "BM32_BN32_BK16_TM2_TN2",
+    "best_metric_ms": 0.01974399946630001,
+    "default_metric_ms": 0.021215999498963356,
+    "win_pct": 6.938160197143997,
+    "n_evaluated": 59,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|48x1x192|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.04198399931192398,
+    "default_metric_ms": 0.06563200056552887,
+    "win_pct": 36.0312058901725,
+    "n_evaluated": 62,
+    "n_noisy_discarded": 2
+  },
+  {
+    "key": "gemm|f32|48x3136x96|sm_75",
+    "best": "BM32_BN64_BK8_TM8_TN2",
+    "best_metric_ms": 0.059167999774217606,
+    "default_metric_ms": 0.07135999947786331,
+    "win_pct": 17.085201503438636,
+    "n_evaluated": 61,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|48x3136x216|sm_75",
+    "best": "BM32_BN64_BK8_TM8_TN2",
+    "best_metric_ms": 0.10857599973678589,
+    "default_metric_ms": 0.13929599523544312,
+    "win_pct": 22.053753553167972,
+    "n_evaluated": 60,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|64x196x192|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.043327998369932175,
+    "default_metric_ms": 0.07276800274848938,
+    "win_pct": 40.45734837647219,
+    "n_evaluated": 62,
+    "n_noisy_discarded": 2
+  },
+  {
+    "key": "gemm|f32|64x196x384|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.07171200215816498,
+    "default_metric_ms": 0.12492799758911133,
+    "win_pct": 42.597333230277144,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|64x3136x576|sm_75",
+    "best": "BM32_BN64_BK8_TM8_TN2",
+    "best_metric_ms": 0.2794879972934723,
+    "default_metric_ms": 0.33228799700737,
+    "win_pct": 15.889830565479807,
+    "n_evaluated": 61,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|64x12544x147|sm_75",
+    "best": "BM32_BN128_BK8_TM8_TN4",
+    "best_metric_ms": 0.18940800428390503,
+    "default_metric_ms": 0.286080002784729,
+    "win_pct": 33.791945455750096,
+    "n_evaluated": 63,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|96x1x24|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.020287999883294106,
+    "default_metric_ms": 0.024927999824285507,
+    "win_pct": 18.613607083192424,
+    "n_evaluated": 62,
+    "n_noisy_discarded": 2
+  },
+  {
+    "key": "gemm|f32|96x1x384|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.06867200136184692,
+    "default_metric_ms": 0.11472000181674957,
+    "win_pct": 40.13946977481608,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|96x196x384|sm_75",
+    "best": "BM32_BN32_BK16_TM2_TN4",
+    "best_metric_ms": 0.08601599931716919,
+    "default_metric_ms": 0.12438400089740753,
+    "win_pct": 30.84641216186995,
+    "n_evaluated": 63,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|96x196x576|sm_75",
+    "best": "BM32_BN32_BK16_TM2_TN4",
+    "best_metric_ms": 0.11907199770212173,
+    "default_metric_ms": 0.17606399953365326,
+    "win_pct": 32.370048381547726,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|96x784x48|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN2",
+    "best_metric_ms": 0.02969600073993206,
+    "default_metric_ms": 0.038047999143600464,
+    "win_pct": 21.951215810708877,
+    "n_evaluated": 59,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|96x784x192|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN2",
+    "best_metric_ms": 0.06521599739789963,
+    "default_metric_ms": 0.08582399785518646,
+    "win_pct": 24.011932527379305,
+    "n_evaluated": 61,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|96x3136x48|sm_75",
+    "best": "BM32_BN128_BK8_TM8_TN2",
+    "best_metric_ms": 0.046592000871896744,
+    "default_metric_ms": 0.06496000289916992,
+    "win_pct": 28.275863927813788,
+    "n_evaluated": 62,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|96x12544x16|sm_75",
+    "best": "BM32_BN64_BK8_TM8_TN2",
+    "best_metric_ms": 0.05734400078654289,
+    "default_metric_ms": 0.08934400230646133,
+    "win_pct": 35.81661968774843,
+    "n_evaluated": 62,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|128x784x64|sm_75",
+    "best": "BM32_BN64_BK16_TM8_TN2",
+    "best_metric_ms": 0.03782400116324425,
+    "default_metric_ms": 0.046879999339580536,
+    "win_pct": 19.31740252540993,
+    "n_evaluated": 60,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|128x784x576|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN4",
+    "best_metric_ms": 0.19443200528621674,
+    "default_metric_ms": 0.21913599967956543,
+    "win_pct": 11.273361943940039,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|128x784x1152|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN4",
+    "best_metric_ms": 0.3702079951763153,
+    "default_metric_ms": 0.4137279987335205,
+    "win_pct": 10.518989212822444,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|144x3136x24|sm_75",
+    "best": "BM32_BN64_BK8_TM8_TN2",
+    "best_metric_ms": 0.042208001017570496,
+    "default_metric_ms": 0.06566400080919266,
+    "win_pct": 35.7212468058121,
+    "n_evaluated": 60,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|160x49x576|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.09894400089979172,
+    "default_metric_ms": 0.1757120043039322,
+    "win_pct": 43.68967487921513,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|160x49x960|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.15488000214099884,
+    "default_metric_ms": 0.2805759906768799,
+    "win_pct": 44.79926747568237,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|192x1x48|sm_75",
+    "best": "BM32_BN32_BK16_TM2_TN4",
+    "best_metric_ms": 0.023711999878287315,
+    "default_metric_ms": 0.02876799926161766,
+    "win_pct": 17.57508173352908,
+    "n_evaluated": 63,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|192x196x96|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN2",
+    "best_metric_ms": 0.04211200028657913,
+    "default_metric_ms": 0.047040000557899475,
+    "win_pct": 10.476190928728165,
+    "n_evaluated": 59,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|192x196x384|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN4",
+    "best_metric_ms": 0.10870400071144104,
+    "default_metric_ms": 0.12483199685811996,
+    "win_pct": 12.919761401405351,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|192x784x32|sm_75",
+    "best": "BM64_BN64_BK16_TM8_TN2",
+    "best_metric_ms": 0.0306560005992651,
+    "default_metric_ms": 0.03481600061058998,
+    "win_pct": 11.948529234743681,
+    "n_evaluated": 61,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|192x784x96|sm_75",
+    "best": "BM64_BN64_BK16_TM8_TN4",
+    "best_metric_ms": 0.053247999399900436,
+    "default_metric_ms": 0.057472001761198044,
+    "win_pct": 7.3496698076547995,
+    "n_evaluated": 61,
+    "n_noisy_discarded": 3
+  },
+  {
+    "key": "gemm|f32|256x196x128|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN2",
+    "best_metric_ms": 0.04915200173854828,
+    "default_metric_ms": 0.057312000542879105,
+    "win_pct": 14.237853725287014,
+    "n_evaluated": 58,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|256x196x1152|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN4",
+    "best_metric_ms": 0.28441599011421204,
+    "default_metric_ms": 0.3323200047016144,
+    "win_pct": 14.415025851487547,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|256x196x2304|sm_75",
+    "best": "BM32_BN64_BK32_TM4_TN2",
+    "best_metric_ms": 0.47407999634742737,
+    "default_metric_ms": 0.6696959733963013,
+    "win_pct": 29.20966898708164,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|320x49x960|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.1542080044746399,
+    "default_metric_ms": 0.22937600314617157,
+    "win_pct": 32.770646292772966,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|384x1x96|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.02937600016593933,
+    "default_metric_ms": 0.04169600084424019,
+    "win_pct": 29.547199800584043,
+    "n_evaluated": 63,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|384x49x192|sm_75",
+    "best": "BM32_BN64_BK32_TM4_TN2",
+    "best_metric_ms": 0.05289600044488907,
+    "default_metric_ms": 0.07158400118350983,
+    "win_pct": 26.10639309014449,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|384x49x768|sm_75",
+    "best": "BM32_BN32_BK16_TM2_TN4",
+    "best_metric_ms": 0.15455999970436096,
+    "default_metric_ms": 0.22732800245285034,
+    "win_pct": 32.0101359987897,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|384x196x64|sm_75",
+    "best": "BM32_BN64_BK16_TM8_TN2",
+    "best_metric_ms": 0.03686400130391121,
+    "default_metric_ms": 0.04707200080156326,
+    "win_pct": 21.685926503708433,
+    "n_evaluated": 58,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|384x196x192|sm_75",
+    "best": "BM32_BN64_BK16_TM8_TN2",
+    "best_metric_ms": 0.07580800354480743,
+    "default_metric_ms": 0.09014400094747543,
+    "win_pct": 15.90344033101128,
+    "n_evaluated": 59,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|512x49x256|sm_75",
+    "best": "BM32_BN32_BK16_TM2_TN4",
+    "best_metric_ms": 0.06454399973154068,
+    "default_metric_ms": 0.088128000497818,
+    "win_pct": 26.761075518627297,
+    "n_evaluated": 63,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|512x49x2304|sm_75",
+    "best": "BM32_BN64_BK32_TM4_TN2",
+    "best_metric_ms": 0.3474560081958771,
+    "default_metric_ms": 0.6833279728889465,
+    "win_pct": 49.15238041157359,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|512x49x4608|sm_75",
+    "best": "BM32_BN32_BK32_TM4_TN2",
+    "best_metric_ms": 0.3850240111351013,
+    "default_metric_ms": 1.3424320220947266,
+    "win_pct": 71.31891933460355,
+    "n_evaluated": 63,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|576x196x96|sm_75",
+    "best": "BM64_BN64_BK16_TM4_TN4",
+    "best_metric_ms": 0.046592000871896744,
+    "default_metric_ms": 0.046592000871896744,
+    "win_pct": 0.0,
+    "n_evaluated": 63,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "gemm|f32|768x49x384|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN4",
+    "best_metric_ms": 0.10675200074911118,
+    "default_metric_ms": 0.12371200323104858,
+    "win_pct": 13.709261865449186,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|960x49x160|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN2",
+    "best_metric_ms": 0.05689600110054016,
+    "default_metric_ms": 0.06348799914121628,
+    "win_pct": 10.38306157044506,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "gemm|f32|1280x49x320|sm_75",
+    "best": "BM32_BN64_BK16_TM4_TN4",
+    "best_metric_ms": 0.0926079973578453,
+    "default_metric_ms": 0.10691200196743011,
+    "win_pct": 13.379231841475018,
+    "n_evaluated": 64,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C32m1_H112W112_O112x112_K3x3_S1x1_P1x1_D1x1|sm_75",
+    "best": "TH4_TW32_dl",
+    "best_metric_ms": 0.0427200011909008,
+    "default_metric_ms": 0.057312000542879105,
+    "win_pct": 25.46063514404982,
+    "n_evaluated": 22,
+    "n_noisy_discarded": 2
+  },
+  {
+    "key": "depthwise|f32|C96m1_H112W112_O56x56_K3x3_S2x2_P1x1_D1x1|sm_75",
+    "best": "TH8_TW32_dl",
+    "best_metric_ms": 0.04505600035190582,
+    "default_metric_ms": 0.06329599767923355,
+    "win_pct": 28.816983689494784,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C144m1_H56W56_O56x56_K3x3_S1x1_P1x1_D1x1|sm_75",
+    "best": "TH8_TW32_dl",
+    "best_metric_ms": 0.04710400104522705,
+    "default_metric_ms": 0.06140799820423126,
+    "win_pct": 23.293378024523534,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C144m1_H56W56_O28x28_K3x3_S2x2_P1x1_D1x1|sm_75",
+    "best": "TH4_TW32_dl",
+    "best_metric_ms": 0.02521600015461445,
+    "default_metric_ms": 0.03494400158524513,
+    "win_pct": 27.83883066997761,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C192m1_H28W28_O28x28_K3x3_S1x1_P1x1_D1x1|sm_75",
+    "best": "TH4_TW32_dl",
+    "best_metric_ms": 0.02486399933695793,
+    "default_metric_ms": 0.03481600061058998,
+    "win_pct": 28.58456198040435,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C192m1_H28W28_O14x14_K3x3_S2x2_P1x1_D1x1|sm_75",
+    "best": "TH16_TW16_dl",
+    "best_metric_ms": 0.018112000077962875,
+    "default_metric_ms": 0.020959999412298203,
+    "win_pct": 13.587783464651597,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C384m1_H14W14_O14x14_K3x3_S1x1_P1x1_D1x1|sm_75",
+    "best": "TH8_TW16_dl",
+    "best_metric_ms": 0.0197759997099638,
+    "default_metric_ms": 0.02454400062561035,
+    "win_pct": 19.426339610957307,
+    "n_evaluated": 23,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "depthwise|f32|C576m1_H14W14_O14x14_K3x3_S1x1_P1x1_D1x1|sm_75",
+    "best": "TH8_TW16_dl",
+    "best_metric_ms": 0.02252800017595291,
+    "default_metric_ms": 0.028672000393271446,
+    "win_pct": 21.428571892599333,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C576m1_H14W14_O7x7_K3x3_S2x2_P1x1_D1x1|sm_75",
+    "best": "TH8_TW8_sm",
+    "best_metric_ms": 0.018432000651955605,
+    "default_metric_ms": 0.018432000651955605,
+    "win_pct": 0.0,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C960m1_H7W7_O7x7_K3x3_S1x1_P1x1_D1x1|sm_75",
+    "best": "TH8_TW8_dl",
+    "best_metric_ms": 0.01817600056529045,
+    "default_metric_ms": 0.020320000126957893,
+    "win_pct": 10.551178879290786,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C48m1_H56W56_O56x56_K3x3_S1x1_P1x1_D1x1|sm_75",
+    "best": "TH8_TW32_dl",
+    "best_metric_ms": 0.024639999493956566,
+    "default_metric_ms": 0.030432000756263733,
+    "win_pct": 19.03260094101771,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C48m1_H56W56_O28x28_K3x3_S2x2_P1x1_D1x1|sm_75",
+    "best": "TH4_TW16_dl",
+    "best_metric_ms": 0.01817600056529045,
+    "default_metric_ms": 0.021023999899625778,
+    "win_pct": 13.546420033925232,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C96m1_H28W28_O28x28_K3x3_S1x1_P1x1_D1x1|sm_75",
+    "best": "TH4_TW32_dl",
+    "best_metric_ms": 0.018783999606966972,
+    "default_metric_ms": 0.02454400062561035,
+    "win_pct": 23.4680609184516,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C96m1_H28W28_O14x14_K3x3_S2x2_P1x1_D1x1|sm_75",
+    "best": "TH8_TW16_dl",
+    "best_metric_ms": 0.015904000028967857,
+    "default_metric_ms": 0.017696000635623932,
+    "win_pct": 10.126585342953632,
+    "n_evaluated": 23,
+    "n_noisy_discarded": 1
+  },
+  {
+    "key": "depthwise|f32|C192m1_H14W14_O14x14_K3x3_S1x1_P1x1_D1x1|sm_75",
+    "best": "TH16_TW16_dl",
+    "best_metric_ms": 0.01635199971497059,
+    "default_metric_ms": 0.019711999222636223,
+    "win_pct": 17.045452720022368,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C192m1_H14W14_O7x7_K3x3_S2x2_P1x1_D1x1|sm_75",
+    "best": "TH8_TW8_dl",
+    "best_metric_ms": 0.015200000256299973,
+    "default_metric_ms": 0.017023999243974686,
+    "win_pct": 10.71428024364065,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  },
+  {
+    "key": "depthwise|f32|C384m1_H7W7_O7x7_K3x3_S1x1_P1x1_D1x1|sm_75",
+    "best": "TH16_TW8_dl",
+    "best_metric_ms": 0.015904000028967857,
+    "default_metric_ms": 0.01635199971497059,
+    "win_pct": 2.7397241549153066,
+    "n_evaluated": 24,
+    "n_noisy_discarded": 0
+  }
+]

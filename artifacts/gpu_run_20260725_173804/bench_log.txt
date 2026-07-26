@@ -1,0 +1,25 @@
+/usr/local/lib/python3.12/dist-packages/torch/profiler/profiler.py:217: UserWarning: Warning: Profiler clears events at the end of each cycle.Only events from the current cycle will be reported.To keep events across cycles, set acc_events=True.
+  _warn_once(
+/usr/local/lib/python3.12/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py:153: UserWarning: Specified provider 'CUDAExecutionProvider' is not in available provider names.Available providers: 'AzureExecutionProvider, CPUExecutionProvider'
+  warnings.warn(
+/usr/local/lib/python3.12/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py:153: UserWarning: Specified provider 'CUDAExecutionProvider' is not in available provider names.Available providers: 'AzureExecutionProvider, CPUExecutionProvider'
+  warnings.warn(
+  resnet18.onnx b1 mdlc: 4.400 ms
+  resnet18.onnx b1 torch-eager: 2.728 ms
+  resnet18.onnx b1 ort-cuda: RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.
+  resnet18.onnx b8 mdlc: 35.822 ms
+  resnet18.onnx b8 torch-eager: 9.559 ms
+  resnet18.onnx b8 ort-cuda: RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.
+  mobilenetv2.onnx b1 mdlc: 2.303 ms
+  mobilenetv2.onnx b1 torch-eager: 5.746 ms
+  mobilenetv2.onnx b1 ort-cuda: RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.
+  mobilenetv2.onnx b8 mdlc: 13.882 ms
+  mobilenetv2.onnx b8 torch-eager: 7.743 ms
+  mobilenetv2.onnx b8 ort-cuda: RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.
+  repvit_m0_9.onnx b1 mdlc: 5.186 ms
+  repvit_m0_9.onnx b1 torch-eager: 7.259 ms
+  repvit_m0_9.onnx b1 ort-cuda: RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.
+  repvit_m0_9.onnx b8 mdlc: 31.046 ms
+  repvit_m0_9.onnx b8 torch-eager: 8.245 ms
+  repvit_m0_9.onnx b8 ort-cuda: RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.
+wrote artifacts/gpu_run_20260725_173804/bench.json

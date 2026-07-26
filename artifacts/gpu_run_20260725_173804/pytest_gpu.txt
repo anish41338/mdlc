@@ -1,0 +1,16 @@
+........................                                                 [100%]
+=============================== warnings summary ===============================
+tests/test_gpu.py::test_target_model_on_device[mdlc.tools.build_mobilenetv2-mobilenetv2]
+  /kaggle/working/mdlc/mdlc/tools/build_mobilenetv2.py:29: DeprecationWarning: You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, the new torch.export-based ONNX exporter has become the default. Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. For exporting control flow: https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html
+    torch.onnx.export(
+
+tests/test_gpu.py::test_target_model_on_device[mdlc.tools.build_mobilenetv2-mobilenetv2]
+tests/test_gpu.py::test_target_model_on_device[mdlc.tools.build_repvit-repvit]
+  /usr/local/lib/python3.12/dist-packages/torch/onnx/_internal/torchscript_exporter/utils.py:218: DeprecationWarning: The feature will be removed. Please remove usage of this function
+    setup_onnx_logging(verbose) as log_ctx,
+
+tests/test_gpu.py::test_target_model_on_device[mdlc.tools.build_repvit-repvit]
+  /kaggle/working/mdlc/mdlc/tools/build_repvit.py:50: DeprecationWarning: You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, the new torch.export-based ONNX exporter has become the default. Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. For exporting control flow: https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html
+    torch.onnx.export(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

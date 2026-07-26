@@ -197,26 +197,41 @@ tier requires a written numerical justification in that file + human sign-off.
    bound (ORT otherwise falls back to CPU silently — a CPU timing labelled
    "ort-cuda" would be a fabricated baseline).
 
-## 11. Phase 2 measured results (T4, sm_75, run 20260725_162618)
+## 11. Phase 2 measured results (T4, sm_75, run 20260725_173804)
 
-`pytest -m gpu` 24/24. Tuning: 72 entries/arch, best GEMM win 70.9%
+Artifact: `artifacts/gpu_run_20260725_173804/` (git `b1d581f`), rendered to
+`docs/BENCHMARKS.md` by `mdlc.tools.gen_benchmarks` — no hand-typed numbers.
+
+`pytest -m gpu` **24/24**. Tuning: 72 entries, all `sm_75`, best GEMM win 70.9%
 (`512x49x4608`), depthwise 1.7–26.8%, `576x196x96` won 0.0% (default already
-optimal — the tuner is not fitting noise).
+optimal — the tuner is not fitting noise). Cache and reports parse as strict
+JSON (no `Infinity`/`NaN` tokens; see the noisy-baseline fix above).
 
-Latency (median ms) vs PyTorch eager, same card:
+Latency (median ms, 200 iters / 50 warmups, H2D/D2H excluded) vs PyTorch eager:
 
-| Model | b1 mdlc | b1 torch | b8 mdlc | b8 torch |
-|---|---|---|---|---|
-| MobileNetV2 | **2.218** | 5.738 | 13.897 | 7.529 |
-| RepViT-m0_9 | **5.049** | 7.226 | 30.744 | 8.134 |
-| ResNet-18 | 4.440 | 2.748 | 35.749 | 9.438 |
+| Model | b1 mdlc | b1 torch | b8 mdlc | b8 torch | b1 launches (mdlc/torch) |
+|---|---|---|---|---|---|
+| MobileNetV2 | **2.303** | 5.746 | 13.882 | 7.743 | 99 / 153 |
+| RepViT-m0_9 | **5.186** | 7.259 | 31.046 | 8.245 | 255 / 290 |
+| ResNet-18 | 4.400 | 2.728 | 35.822 | 9.559 | 51 / 91 |
 
-Reading it honestly: we beat eager 2.59× (MobileNetV2) and 1.43× (RepViT) at
+On-device parity vs the ORT golden, same seeded inputs, all six rows:
+max_abs **1.5e-06 – 5.7e-06**, `host fallbacks: none`. Latency without a
+correctness check alongside it is not reported.
+
+Reading it honestly: we beat eager 2.50× (MobileNetV2) and 1.40× (RepViT) at
 batch-1 — the depthwise-heavy mobile graphs where fusion and launch-count
-reduction pay. We lose ResNet-18 at 1.62×, whose dense 3×3 convs are cuDNN's
-best case, and we lose every batch-8 row by 1.85–3.79× to the per-image launch
-gap (§9.4). No tensor cores, no double-buffering, no CUDA graphs — §9.7 and the
-Phase-4 list are the reasons, and they are now quantified rather than asserted.
+reduction pay. We lose ResNet-18 at 1.61×, whose dense 3×3 convs are cuDNN's
+best case, and we lose every batch-8 row by 1.79–3.77× to the per-image launch
+gap (§9.4) — ResNet-18 goes 51 launches at b1 to 331 at b8, which is the gap in
+one number. No tensor cores, no double-buffering, no CUDA graphs — §9.7 and the
+Phase-4 list are the reasons, now quantified rather than asserted.
+
+**Baseline strength (§9.9):** eager pays Python dispatch per op — the very
+overhead a compiler removes — so it is the weakest defensible baseline. ORT
+CUDA EP did not load and `torch.compile` is wired but unrun; until those land,
+the eager win is real but under-challenged, and it should be presented that
+way.
 
 ## 10. Phase 1 acceptance — MET
 

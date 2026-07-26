@@ -1,0 +1,224 @@
+{
+  "kind": "mdlc_benchmark_suite",
+  "env": {
+    "timestamp_utc": "2026-07-25T17:56:37.717320+00:00",
+    "git_sha": "b1d581f1a2a96a7adab836bbf110f2ce8e894c84",
+    "python": "3.12.13",
+    "platform": "Linux-6.12.90+-x86_64-with-glibc2.35",
+    "onnxruntime": "1.28.0",
+    "torch": "2.10.0+cu128",
+    "gpu": "Tesla T4",
+    "cuda_runtime": "12.8",
+    "sm_arch": "sm_75",
+    "driver": "580.159.04"
+  },
+  "config": {
+    "iters": 200,
+    "warmup": 50,
+    "seed": 20260705,
+    "h2d_d2h_excluded": true,
+    "fast_math": false,
+    "cudnn_benchmark": true,
+    "ort_graph_opt": "ALL"
+  },
+  "rows": [
+    {
+      "median_ms": 4.40012788772583,
+      "p10_ms": 4.345856189727783,
+      "p90_ms": 4.447872161865234,
+      "n": 200,
+      "system": "mdlc",
+      "timing": "cuda_events",
+      "launches": 51,
+      "device_bytes": 110913952,
+      "pool_bytes": 4816896,
+      "fallbacks": [],
+      "parity_max_abs_vs_ort": 4.291534423828125e-06,
+      "model": "resnet18.onnx",
+      "batch": 1
+    },
+    {
+      "median_ms": 2.727936029434204,
+      "p10_ms": 2.68287992477417,
+      "p90_ms": 2.866368055343628,
+      "n": 200,
+      "system": "torch-eager",
+      "timing": "cuda_events",
+      "device_bytes": 1193171968,
+      "launches": 91,
+      "model": "resnet18.onnx",
+      "batch": 1
+    },
+    {
+      "system": "ort-cuda",
+      "error": "RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.",
+      "model": "resnet18.onnx",
+      "batch": 1
+    },
+    {
+      "median_ms": 35.82182312011719,
+      "p10_ms": 35.19535827636719,
+      "p90_ms": 36.410945892333984,
+      "n": 200,
+      "system": "mdlc",
+      "timing": "cuda_events",
+      "launches": 331,
+      "device_bytes": 148847008,
+      "pool_bytes": 38535168,
+      "fallbacks": [],
+      "parity_max_abs_vs_ort": 5.7220458984375e-06,
+      "model": "resnet18.onnx",
+      "batch": 8
+    },
+    {
+      "median_ms": 9.558624267578125,
+      "p10_ms": 9.492095947265625,
+      "p90_ms": 9.750335693359375,
+      "n": 200,
+      "system": "torch-eager",
+      "timing": "cuda_events",
+      "device_bytes": 1240665088,
+      "launches": 85,
+      "model": "resnet18.onnx",
+      "batch": 8
+    },
+    {
+      "system": "ort-cuda",
+      "error": "RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.",
+      "model": "resnet18.onnx",
+      "batch": 8
+    },
+    {
+      "median_ms": 2.3027520179748535,
+      "p10_ms": 2.161407947540283,
+      "p90_ms": 2.528831958770752,
+      "n": 200,
+      "system": "mdlc",
+      "timing": "cuda_events",
+      "launches": 99,
+      "device_bytes": 35834272,
+      "pool_bytes": 8429568,
+      "fallbacks": [],
+      "parity_max_abs_vs_ort": 3.4570693969726562e-06,
+      "model": "mobilenetv2.onnx",
+      "batch": 1
+    },
+    {
+      "median_ms": 5.746335983276367,
+      "p10_ms": 5.599135875701904,
+      "p90_ms": 5.978975772857666,
+      "n": 200,
+      "system": "torch-eager",
+      "timing": "cuda_events",
+      "device_bytes": 970962944,
+      "launches": 153,
+      "model": "mobilenetv2.onnx",
+      "batch": 1
+    },
+    {
+      "system": "ort-cuda",
+      "error": "RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.",
+      "model": "mobilenetv2.onnx",
+      "batch": 1
+    },
+    {
+      "median_ms": 13.882431983947754,
+      "p10_ms": 13.563936233520508,
+      "p90_ms": 14.441856384277344,
+      "n": 200,
+      "system": "mdlc",
+      "timing": "cuda_events",
+      "launches": 589,
+      "device_bytes": 99056032,
+      "pool_bytes": 67436544,
+      "fallbacks": [],
+      "parity_max_abs_vs_ort": 5.4836273193359375e-06,
+      "model": "mobilenetv2.onnx",
+      "batch": 8
+    },
+    {
+      "median_ms": 7.742559909820557,
+      "p10_ms": 7.716512203216553,
+      "p90_ms": 7.832352161407471,
+      "n": 200,
+      "system": "torch-eager",
+      "timing": "cuda_events",
+      "device_bytes": 983385600,
+      "launches": 171,
+      "model": "mobilenetv2.onnx",
+      "batch": 8
+    },
+    {
+      "system": "ort-cuda",
+      "error": "RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.",
+      "model": "mobilenetv2.onnx",
+      "batch": 8
+    },
+    {
+      "median_ms": 5.186016082763672,
+      "p10_ms": 4.9983038902282715,
+      "p90_ms": 5.509183883666992,
+      "n": 200,
+      "system": "mdlc",
+      "timing": "cuda_events",
+      "launches": 255,
+      "device_bytes": 45152676,
+      "pool_bytes": 3010560,
+      "fallbacks": [],
+      "parity_max_abs_vs_ort": 1.5497207641601562e-06,
+      "model": "repvit_m0_9.onnx",
+      "batch": 1
+    },
+    {
+      "median_ms": 7.2591681480407715,
+      "p10_ms": 7.095967769622803,
+      "p90_ms": 7.6820478439331055,
+      "n": 200,
+      "system": "torch-eager",
+      "timing": "cuda_events",
+      "device_bytes": 714599936,
+      "launches": 290,
+      "model": "repvit_m0_9.onnx",
+      "batch": 1
+    },
+    {
+      "system": "ort-cuda",
+      "error": "RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.",
+      "model": "repvit_m0_9.onnx",
+      "batch": 1
+    },
+    {
+      "median_ms": 31.045759201049805,
+      "p10_ms": 30.361183166503906,
+      "p90_ms": 32.26230239868164,
+      "n": 200,
+      "system": "mdlc",
+      "timing": "cuda_events",
+      "launches": 1333,
+      "device_bytes": 70441380,
+      "pool_bytes": 24084480,
+      "fallbacks": [],
+      "parity_max_abs_vs_ort": 2.1457672119140625e-06,
+      "model": "repvit_m0_9.onnx",
+      "batch": 8
+    },
+    {
+      "median_ms": 8.244640350341797,
+      "p10_ms": 8.120256423950195,
+      "p90_ms": 8.372096061706543,
+      "n": 200,
+      "system": "torch-eager",
+      "timing": "cuda_events",
+      "device_bytes": 739351040,
+      "launches": 309,
+      "model": "repvit_m0_9.onnx",
+      "batch": 8
+    },
+    {
+      "system": "ort-cuda",
+      "error": "RuntimeError: Can't allocate memory on the device using this package of OnnxRuntime. Please use the appropriate package of OnnxRuntime for your hardware to use this feature.",
+      "model": "repvit_m0_9.onnx",
+      "batch": 8
+    }
+  ]
+}
