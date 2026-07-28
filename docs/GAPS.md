@@ -202,8 +202,9 @@ tier requires a written numerical justification in that file + human sign-off.
 Artifact: `artifacts/gpu_run_20260725_173804/` (git `b1d581f`), rendered to
 `docs/BENCHMARKS.md` by `mdlc.tools.gen_benchmarks` — no hand-typed numbers.
 
-`pytest -m gpu` **24/24**. Tuning: 72 entries, all `sm_75`, best GEMM win 70.9%
-(`512x49x4608`), depthwise 1.7–26.8%, `576x196x96` won 0.0% (default already
+`pytest -m gpu` **24/24**. Tuning: 72 entries, all `sm_75`, 3,827 configs
+evaluated, 31 discarded as noisy. Best GEMM win 71.3%
+(`512x49x4608`), depthwise 0.0–28.8%, `576x196x96` won 0.0% (default already
 optimal — the tuner is not fitting noise). Cache and reports parse as strict
 JSON (no `Infinity`/`NaN` tokens; see the noisy-baseline fix above).
 

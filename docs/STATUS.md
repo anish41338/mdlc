@@ -13,8 +13,9 @@ pooled allocator, and MobileNetV2 + RepViT end-to-end vs the ORT golden.
 
 Measured autotuning: 55 GEMM shapes + 17 depthwise signatures, **72 cache
 entries** (all `sm_75`), ≤64 configs each, median-of-50 CUDA-event samples,
-noisy configs discarded by an IQR gate. Best GEMM win **70.9%** over the naive
-default (`512x49x4608`); depthwise wins 1.7–26.8%. The shape of the result is
+noisy configs discarded by an IQR gate (31 of 3,827 evaluations). Best GEMM win
+**71.3%** over the naive default (`512x49x4608`, mean 26.6%); depthwise wins
+0.0–28.8% (mean 17.4%). The shape of the result is
 what an honest tuner looks like: big wins on tall-skinny classifier GEMMs, and
 ~0% where the default was already right (`576x196x96`: 0.0%).
 
